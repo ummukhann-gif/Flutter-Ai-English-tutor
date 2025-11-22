@@ -1,0 +1,8 @@
+{
+  "name": "AI English Tutor",
+  "description": "An interactive AI tutor that helps you learn English through voice conversations, personalized lesson plans, and homework evaluations. Your learning path adapts based on your progress.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
