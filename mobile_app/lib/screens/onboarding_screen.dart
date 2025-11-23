@@ -149,83 +149,122 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final history = context.watch<AppProvider>().history.onboardingConversation;
+    final theme = Theme.of(context);
 
     return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
-        title: const Text('AI Ustoz bilan tanishuv'),
+        title: const Text('AI ustoz bilan tanishuv'),
         centerTitle: true,
-        backgroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.only(bottom: 20),
-              itemCount: history.length + (_isAiTyping ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index < history.length) {
-                  return ChatBubble(message: history[index]);
-                } else {
-                  // Show streaming text
-                  return ChatBubble(
-                    message: Conversation(
-                      speaker: Speaker.ai, 
-                      text: _streamingText.isEmpty ? '...' : _streamingText, 
-                      timestamp: DateTime.now()
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary,
+                      shape: BoxShape.circle,
                     ),
-                    isTyping: _streamingText.isEmpty,
-                  );
-                }
-              },
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    decoration: InputDecoration(
-                      hintText: 'Maqsadlaringiz haqida yozing...',
-                      fillColor: Colors.grey.shade100,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(30),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 14,
-                      ),
-                    ),
-                    onSubmitted: (_) => _handleSend(),
+                    alignment: Alignment.center,
+                    child: const Text('AI', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
-                ),
-                const SizedBox(width: 10),
-                FloatingActionButton(
-                  onPressed: _handleSend,
-                  backgroundColor: Theme.of(context).primaryColor,
-                  elevation: 0,
-                  child: const Icon(Icons.send_rounded, color: Colors.white),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Text('Kai', style: theme.textTheme.labelLarge),
+                ],
+              ),
             ),
           ),
         ],
       ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.only(bottom: 20, top: 8),
+                itemCount: history.length + (_isAiTyping ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index < history.length) {
+                    return ChatBubble(message: history[index]);
+                  } else {
+                    return ChatBubble(
+                      message: Conversation(
+                        speaker: Speaker.ai, 
+                        text: _streamingText.isEmpty ? '...' : _streamingText, 
+                        timestamp: DateTime.now(),
+                      ),
+                      isTyping: _streamingText.isEmpty,
+                    );
+                  }
+                },
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, -8),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _textController,
+                      decoration: InputDecoration(
+                        hintText: "Maqsadlaringiz haqida yozing...",
+                        fillColor: theme.colorScheme.surface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(28),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      ),
+                      onSubmitted: (_) => _handleSend(),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+                      ),
+                      borderRadius: BorderRadius.circular(30),
+                      boxShadow: [
+                        BoxShadow(
+                          color: theme.colorScheme.primary.withOpacity(0.3),
+                          blurRadius: 10,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.send_rounded, color: Colors.white),
+                      onPressed: _handleSend,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
-

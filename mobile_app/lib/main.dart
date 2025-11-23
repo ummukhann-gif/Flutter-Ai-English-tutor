@@ -1,5 +1,7 @@
 
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'theme/app_theme.dart';
 import 'providers/app_provider.dart';
@@ -10,7 +12,11 @@ import 'screens/tutor_screen.dart';
 import 'screens/review_screen.dart';
 import 'screens/loading_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: '.env');
+  // Avoid runtime font fetching; use bundled fonts to prevent network errors.
+  GoogleFonts.config.allowRuntimeFetching = false;
   runApp(const MyApp());
 }
 

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "dart": {
+      "command": "/home/khan/development/flutter/bin/dart",
+      "args": ["mcp-server", "--flutter-sdk", "/home/khan/development/flutter"],
+      "env": {
+        "PATH": "/home/khan/development/flutter/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

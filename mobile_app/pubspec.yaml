@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   google_generative_ai: ^0.4.0
+  flutter_dotenv: ^5.2.1
   shared_preferences: ^2.2.2
   flutter_markdown: ^0.6.18+3
   google_fonts: ^6.1.0
@@ -19,6 +20,9 @@ dependencies:
   animate_do: ^3.3.2
   flutter_svg: ^2.0.9
   cupertino_icons: ^1.0.6
+  web_socket_channel: ^2.4.0
+  record: ^6.1.2
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -27,3 +31,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - .env

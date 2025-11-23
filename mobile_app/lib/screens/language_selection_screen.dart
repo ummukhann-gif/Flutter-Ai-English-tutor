@@ -10,38 +10,59 @@ class LanguageSelectionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 40),
               FadeInDown(
-                child: Text(
-                  'Xush kelibsiz!',
-                  style: Theme.of(context).textTheme.displayLarge,
-                ),
-              ),
-              const SizedBox(height: 10),
-              FadeInDown(
-                delay: const Duration(milliseconds: 200),
-                child: Text(
-                  'Qaysi tilni o\'rganmoqchisiz?',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.normal,
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withOpacity(0.12),
+                        shape: BoxShape.circle,
                       ),
+                      child: Text('AI', style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.primary)),
+                    ),
+                    const SizedBox(width: 14),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('AI English Tutor', style: theme.textTheme.labelLarge),
+                        Text('Boshlash uchun tilni tanlang', style: theme.textTheme.bodyMedium),
+                      ],
+                    )
+                  ],
                 ),
               ),
-              const SizedBox(height: 60),
+              const SizedBox(height: 28),
+              FadeInDown(
+                delay: const Duration(milliseconds: 120),
+                child: Text('Xush kelibsiz 👋', style: theme.textTheme.displayMedium),
+              ),
+              const SizedBox(height: 8),
+              FadeInDown(
+                delay: const Duration(milliseconds: 220),
+                child: Text(
+                  "Qaysi til orqali ingliz tilini o'rganasiz?",
+                  style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey[700]),
+                ),
+              ),
+              const SizedBox(height: 28),
               FadeInUp(
-                delay: const Duration(milliseconds: 400),
+                delay: const Duration(milliseconds: 280),
                 child: _LanguageCard(
                   flag: '🇺🇸',
                   title: 'Ingliz tili',
-                  subtitle: 'O\'zbek tili orqali',
+                  subtitle: "O'zbek tili orqali",
+                  accent: theme.colorScheme.primary,
                   onTap: () {
                     context.read<AppProvider>().setLanguages(
                           LanguagePair(native: 'Uzbek', target: 'English'),
@@ -49,16 +70,32 @@ class LanguageSelectionScreen extends StatelessWidget {
                   },
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               FadeInUp(
-                delay: const Duration(milliseconds: 600),
+                delay: const Duration(milliseconds: 380),
                 child: _LanguageCard(
-                  flag: '🇷🇺',
+                  flag: '🇺🇸',
                   title: 'Ingliz tili',
                   subtitle: 'Rus tili orqali',
+                  accent: theme.colorScheme.secondary,
                   onTap: () {
                     context.read<AppProvider>().setLanguages(
                           LanguagePair(native: 'Russian', target: 'English'),
+                        );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              FadeInUp(
+                delay: const Duration(milliseconds: 480),
+                child: _LanguageCard(
+                  flag: '🇺🇸',
+                  title: 'Ingliz tili',
+                  subtitle: 'Qozoq tili orqali',
+                  accent: theme.colorScheme.tertiary,
+                  onTap: () {
+                    context.read<AppProvider>().setLanguages(
+                          LanguagePair(native: 'Kazakh', target: 'English'),
                         );
                   },
                 ),
@@ -75,12 +112,14 @@ class _LanguageCard extends StatelessWidget {
   final String flag;
   final String title;
   final String subtitle;
+  final Color accent;
   final VoidCallback onTap;
 
   const _LanguageCard({
     required this.flag,
     required this.title,
     required this.subtitle,
+    required this.accent,
     required this.onTap,
   });
 
@@ -94,12 +133,12 @@ class _LanguageCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.grey.shade100),
+          border: Border.all(color: Colors.grey.shade200),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.shade100,
-              blurRadius: 20,
-              offset: const Offset(0, 10),
+              color: accent.withOpacity(0.12),
+              blurRadius: 18,
+              offset: const Offset(0, 12),
             ),
           ],
         ),
@@ -109,7 +148,7 @@ class _LanguageCard extends StatelessWidget {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.1),
+                color: accent.withOpacity(0.14),
                 shape: BoxShape.circle,
               ),
               child: Center(
@@ -138,7 +177,7 @@ class _LanguageCard extends StatelessWidget {
             const Spacer(),
             Icon(
               Icons.arrow_forward_ios_rounded,
-              color: Theme.of(context).primaryColor,
+              color: accent,
             ),
           ],
         ),

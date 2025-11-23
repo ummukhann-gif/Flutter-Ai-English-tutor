@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'dart:math' as math;
 import '../models/types.dart';
+import '../theme/app_theme.dart';
 
 class ChatBubble extends StatelessWidget {
   final Conversation message;
@@ -17,6 +18,7 @@ class ChatBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = message.speaker == Speaker.user;
     final isSystem = message.speaker == Speaker.system;
+    final theme = Theme.of(context);
 
     if (isSystem) {
       return Center(
@@ -46,22 +48,20 @@ class ChatBubble extends StatelessWidget {
           maxWidth: MediaQuery.of(context).size.width * 0.8,
         ),
         decoration: BoxDecoration(
-          color: isUser ? Theme.of(context).primaryColor : Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(20),
-            topRight: const Radius.circular(20),
-            bottomLeft: Radius.circular(isUser ? 20 : 0),
-            bottomRight: Radius.circular(isUser ? 0 : 20),
-          ),
+          color: isUser ? theme.colorScheme.primary : Colors.white,
+          borderRadius: BorderRadius.circular(26),
           boxShadow: [
-            if (!isUser)
-              BoxShadow(
-                color: Colors.grey.shade100,
-                blurRadius: 5,
-                offset: const Offset(0, 2),
-              ),
+            BoxShadow(
+              color: isUser
+                  ? theme.colorScheme.primary.withOpacity(0.25)
+                  : Colors.black.withOpacity(0.03),
+              blurRadius: isUser ? 14 : 8,
+              offset: const Offset(0, 8),
+            ),
           ],
-          border: !isUser ? Border.all(color: Colors.grey.shade100) : null,
+          border: !isUser
+              ? Border.all(color: Colors.grey.shade200, width: 1)
+              : null,
         ),
         child: isTyping
             ? const _TypingIndicator()
@@ -69,8 +69,9 @@ class ChatBubble extends StatelessWidget {
                 data: message.text,
                 styleSheet: MarkdownStyleSheet(
                   p: TextStyle(
-                    color: isUser ? Colors.white : Colors.black87,
+                    color: isUser ? Colors.white : AppTheme.textDark,
                     fontSize: 16,
+                    height: 1.4,
                   ),
                 ),
               ),
@@ -122,7 +123,7 @@ class _TypingIndicatorState extends State<_TypingIndicator>
               width: 8,
               height: 8,
               decoration: BoxDecoration(
-                color: Colors.grey.shade400,
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
                 shape: BoxShape.circle,
               ),
             ),

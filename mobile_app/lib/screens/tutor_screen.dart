@@ -1,11 +1,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:convert';
+import 'dart:async';
 import '../providers/app_provider.dart';
 import '../models/types.dart';
-import '../services/gemini_service.dart';
+import '../services/live_gemini_service.dart';
 import '../widgets/chat_bubble.dart';
+
+enum TutorMode { live, chat }
 
 class TutorScreen extends StatefulWidget {
   const TutorScreen({super.key});
@@ -17,31 +19,80 @@ class TutorScreen extends StatefulWidget {
 class _TutorScreenState extends State<TutorScreen> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  bool _isAiTyping = false;
-  String _streamingText = '';
+  bool _isMicOn = false;
+  bool _isReady = false;
+  TutorMode _mode = TutorMode.live;
+
+  late final LiveGeminiService _live;
+  StreamSubscription<String>? _inputSub;
+  StreamSubscription<String>? _outputSub;
+  StreamSubscription<LiveState>? _stateSub;
+  StreamSubscription<String>? _errorSub;
 
   @override
   void initState() {
     super.initState();
+    _live = LiveGeminiService();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startLesson();
     });
   }
 
-  void _startLesson() {
+  Future<void> _startLesson() async {
     final provider = context.read<AppProvider>();
     final lesson = provider.currentLesson;
     if (lesson == null) return;
 
     final history = provider.history.conversations[lesson.id] ?? [];
+    final historyText = history
+        .map((m) => '${m.speaker == Speaker.ai ? 'Tutor' : 'User'}: ${m.text}')
+        .join('\n');
+
+    // If no history, seed with starting prompt (AI message)
     if (history.isEmpty) {
-      final initialMessage = Conversation(
-        speaker: Speaker.ai,
-        text: lesson.startingPrompt,
-        timestamp: DateTime.now(),
-      );
-      provider.updateConversationHistory(lesson.id, [initialMessage]);
+      provider.updateConversationHistory(lesson.id, [
+        Conversation(
+          speaker: Speaker.ai,
+          text: lesson.startingPrompt,
+          timestamp: DateTime.now(),
+        )
+      ]);
     }
+
+    final systemPrompt = '''
+You are a strict, professional language tutor ("ustoz") teaching a ${provider.languages?.native} speaker to learn ${provider.languages?.target}.
+Lesson title: ${lesson.title}
+Tasks: ${lesson.tasks.join('; ')}
+Vocabulary: ${lesson.vocabulary.map((v) => '${v.word} (${v.translation})').join(', ')}
+If user is silent or says "I don't know", immediately teach and make them repeat. Keep replies concise. Explain in ${provider.languages?.native} when needed, encourage speaking in ${provider.languages?.target}.
+When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and brief feedback.
+''';
+
+    await _live.connect(
+      systemInstruction: systemPrompt,
+      historyContext: historyText.isEmpty ? null : historyText,
+    );
+
+    _inputSub = _live.inputTranscriptStream.listen((text) {
+      _appendMessage(Speaker.user, text, lesson.id);
+    });
+
+    _outputSub = _live.outputTranscriptStream.listen((text) {
+      _appendMessage(Speaker.ai, text, lesson.id);
+      if (text.contains('LESSON_COMPLETE')) {
+        _handleCompletion(text, lesson);
+      }
+    });
+
+    _stateSub = _live.connectionStateStream.listen((state) {
+      setState(() {
+        _isReady = state == LiveState.ready || state == LiveState.recording;
+      });
+    });
+
+    _errorSub = _live.errorStream.listen((err) {
+      debugPrint('Live error: $err');
+    });
   }
 
   void _scrollToBottom() {
@@ -54,122 +105,62 @@ class _TutorScreenState extends State<TutorScreen> {
     }
   }
 
-  Future<void> _handleSend() async {
-    final text = _textController.text.trim();
-    if (text.isEmpty || _isAiTyping) return;
-
-    _textController.clear();
+  void _appendMessage(Speaker speaker, String text, String lessonId) {
     final provider = context.read<AppProvider>();
-    final lesson = provider.currentLesson;
-    if (lesson == null) return;
-
-    // Add user message
-    final userMsg = Conversation(
-      speaker: Speaker.user,
+    final history = List<Conversation>.from(
+        provider.history.conversations[lessonId] ?? []);
+    history.add(Conversation(
+      speaker: speaker,
       text: text,
       timestamp: DateTime.now(),
-    );
-
-    var currentHistory = List<Conversation>.from(
-        provider.history.conversations[lesson.id] ?? []);
-    currentHistory.add(userMsg);
-    provider.updateConversationHistory(lesson.id, currentHistory);
-
-    setState(() {
-      _isAiTyping = true;
-      _streamingText = '';
-    });
+    ));
+    provider.updateConversationHistory(lessonId, history);
     _scrollToBottom();
-
-    final gemini = GeminiService();
-
-    try {
-      final stream = gemini.getTutorResponseStream(
-        lesson,
-        currentHistory,
-        provider.languages!,
-      );
-
-      await for (final chunk in stream) {
-        setState(() {
-          _streamingText += chunk;
-        });
-        _scrollToBottom();
-      }
-
-      String fullResponse = _streamingText;
-      
-      const token = 'LESSON_COMPLETE';
-      if (fullResponse.contains(token)) {
-        final parts = fullResponse.split(token);
-        final visibleText = parts[0].trim();
-        final jsonPart = parts.length > 1 ? parts[1].trim() : '';
-
-        if (visibleText.isNotEmpty) {
-           currentHistory.add(Conversation(
-            speaker: Speaker.ai,
-            text: visibleText,
-            timestamp: DateTime.now(),
-          ));
-        }
-        await provider.updateConversationHistory(lesson.id, currentHistory);
-
-        if (jsonPart.isNotEmpty) {
-          try {
-            final json = _parseJson(jsonPart);
-            final score = Score(
-              lessonId: lesson.id,
-              score: json['score'] is int ? json['score'] : int.tryParse(json['score'].toString()) ?? 0,
-              feedback: json['feedback'] ?? 'No feedback',
-              completedAt: DateTime.now(),
-            );
-            
-            // Show completion dialog
-            if (mounted) {
-               await showDialog(
-                 context: context,
-                 barrierDismissible: false,
-                 builder: (c) => _CompletionDialog(score: score, onNext: () {
-                   Navigator.pop(c);
-                   provider.completeLesson(score);
-                 }),
-               );
-            }
-          } catch (e) {
-            print("Error parsing completion JSON: $e");
-          }
-        }
-      } else {
-        currentHistory.add(Conversation(
-          speaker: Speaker.ai,
-          text: fullResponse,
-          timestamp: DateTime.now(),
-        ));
-        await provider.updateConversationHistory(lesson.id, currentHistory);
-      }
-
-    } catch (e) {
-      print("Error: $e");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isAiTyping = false;
-          _streamingText = '';
-        });
-        _scrollToBottom();
-      }
-    }
   }
-  
-  Map<String, dynamic> _parseJson(String text) {
-    text = text.replaceAll('```json', '').replaceAll('```', '').trim();
-    // Find the first '{' and last '}'
-    final start = text.indexOf('{');
-    final end = text.lastIndexOf('}');
-    if (start != -1 && end != -1) {
-      text = text.substring(start, end + 1);
+
+  void _handleCompletion(String text, Lesson lesson) async {
+    final provider = context.read<AppProvider>();
+    final parts = text.split('LESSON_COMPLETE');
+    final visibleText = parts[0].trim();
+    final rest = parts.length > 1 ? parts[1].trim() : '';
+    int scoreVal = 8;
+    String feedback = 'Good job!';
+    if (rest.isNotEmpty) {
+      final lines = rest.split('\n').where((e) => e.trim().isNotEmpty).toList();
+      if (lines.isNotEmpty) {
+        scoreVal = int.tryParse(lines[0].replaceAll(RegExp(r'[^0-9]'), '')) ?? scoreVal;
+      }
+      if (lines.length > 1) feedback = lines.sublist(1).join(' ').trim();
     }
-    return jsonDecode(text);
+
+    // Replace last AI message with visibleText only
+    final history = List<Conversation>.from(
+        provider.history.conversations[lesson.id] ?? []);
+    if (history.isNotEmpty && history.last.speaker == Speaker.ai) {
+      history[history.length - 1] = Conversation(
+        speaker: history.last.speaker,
+        text: visibleText,
+        timestamp: history.last.timestamp,
+      );
+    }
+    final score = Score(
+      lessonId: lesson.id,
+      score: scoreVal,
+      feedback: feedback,
+      completedAt: DateTime.now(),
+    );
+    await provider.updateConversationHistory(lesson.id, history);
+
+    if (mounted) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => _CompletionDialog(score: score, onNext: () {
+          Navigator.pop(c);
+          provider.completeLesson(score);
+        }),
+      );
+    }
   }
 
   @override
@@ -179,17 +170,64 @@ class _TutorScreenState extends State<TutorScreen> {
     if (lesson == null) return const SizedBox();
 
     final history = provider.history.conversations[lesson.id] ?? [];
+    final theme = Theme.of(context);
 
     return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
         title: Text(lesson.title),
         centerTitle: true,
-        backgroundColor: Colors.white,
-        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close_rounded),
           onPressed: () => provider.exitLesson(),
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: ToggleButtons(
+              borderRadius: BorderRadius.circular(20),
+              isSelected: [
+                _mode == TutorMode.live,
+                _mode == TutorMode.chat,
+              ],
+              onPressed: (i) {
+                setState(() {
+                  if (i == 0) {
+                    _mode = TutorMode.live;
+                  } else {
+                    _mode = TutorMode.chat;
+                    if (_isMicOn) {
+                      _live.stopMicStream();
+                      _isMicOn = false;
+                    }
+                  }
+                });
+              },
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.mic_none, size: 16),
+                      SizedBox(width: 6),
+                      Text('Live'),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.chat_bubble_outline, size: 16),
+                      SizedBox(width: 6),
+                      Text('Chat'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -197,61 +235,78 @@ class _TutorScreenState extends State<TutorScreen> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.only(bottom: 20),
-              itemCount: history.length + (_isAiTyping ? 1 : 0),
+              itemCount: history.length,
               itemBuilder: (context, index) {
-                if (index < history.length) {
-                  return ChatBubble(message: history[index]);
-                } else {
-                  return ChatBubble(
-                    message: Conversation(
-                      speaker: Speaker.ai,
-                      text: _streamingText.isEmpty ? '...' : _streamingText,
-                      timestamp: DateTime.now(),
-                    ),
-                    isTyping: _streamingText.isEmpty,
-                  );
-                }
+                return ChatBubble(message: history[index]);
               },
             ),
           ),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
             decoration: BoxDecoration(
               color: Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 16,
+                  offset: const Offset(0, -8),
                 ),
               ],
             ),
             child: Row(
               children: [
+                if (_mode == TutorMode.live) ...[
+                  IconButton(
+                    icon: Icon(_isMicOn ? Icons.mic : Icons.mic_none, color: theme.colorScheme.primary),
+                    onPressed: () async {
+                      await _ensureConnected();
+                      if (_isMicOn) {
+                        _live.stopMicStream();
+                      } else {
+                        await _live.startMicStream();
+                      }
+                      setState(() {
+                        _isMicOn = !_isMicOn;
+                      });
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Expanded(
                   child: TextField(
                     controller: _textController,
                     decoration: InputDecoration(
                       hintText: 'Javobingizni yozing...',
-                      fillColor: Colors.grey.shade100,
+                      fillColor: theme.colorScheme.surface,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(30),
+                        borderRadius: BorderRadius.circular(28),
                         borderSide: BorderSide.none,
                       ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 14,
-                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                     ),
-                    onSubmitted: (_) => _handleSend(),
+                    onSubmitted: (_) => _handleSendText(),
                   ),
                 ),
                 const SizedBox(width: 10),
-                FloatingActionButton(
-                  onPressed: _handleSend,
-                  backgroundColor: Theme.of(context).primaryColor,
-                  elevation: 0,
-                  child: const Icon(Icons.send_rounded, color: Colors.white),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+                    ),
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.primary.withOpacity(0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.send_rounded, color: Colors.white),
+                    onPressed: _handleSendText,
+                  ),
                 ),
               ],
             ),
@@ -259,6 +314,49 @@ class _TutorScreenState extends State<TutorScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _handleSendText() async {
+    final text = _textController.text.trim();
+    if (text.isEmpty) return;
+    _textController.clear();
+    final provider = context.read<AppProvider>();
+    final lesson = provider.currentLesson;
+    if (lesson == null) return;
+    await _ensureConnected();
+    _appendMessage(Speaker.user, text, lesson.id);
+    _live.sendText(text);
+  }
+
+  Future<void> _ensureConnected() async {
+    if (_isReady) return;
+    final provider = context.read<AppProvider>();
+    final lesson = provider.currentLesson;
+    if (lesson == null) return;
+    final history = provider.history.conversations[lesson.id] ?? [];
+    final historyText = history
+        .map((m) => '${m.speaker == Speaker.ai ? 'Tutor' : 'User'}: ${m.text}')
+        .join('\n');
+    final systemPrompt = '''
+You are a strict, professional language tutor ("ustoz") teaching a ${provider.languages?.native} speaker to learn ${provider.languages?.target}.
+Lesson title: ${lesson.title}
+Tasks: ${lesson.tasks.join('; ')}
+Vocabulary: ${lesson.vocabulary.map((v) => '${v.word} (${v.translation})').join(', ')}
+If user is silent or says "I don't know", immediately teach and make them repeat. Keep replies concise. Explain in ${provider.languages?.native} when needed, encourage speaking in ${provider.languages?.target}.
+When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and brief feedback.
+''';
+    await _live.connect(systemInstruction: systemPrompt, historyContext: historyText.isEmpty ? null : historyText);
+  }
+
+  @override
+  void dispose() {
+    _inputSub?.cancel();
+    _outputSub?.cancel();
+    _stateSub?.cancel();
+    _errorSub?.cancel();
+    _live.stopMicStream();
+    _live.dispose();
+    super.dispose();
   }
 }
 

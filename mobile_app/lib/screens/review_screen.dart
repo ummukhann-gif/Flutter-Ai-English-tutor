@@ -15,13 +15,13 @@ class ReviewScreen extends StatelessWidget {
 
     final history = provider.history.conversations[lesson.id] ?? [];
     final score = provider.history.scores.firstWhere((s) => s.lessonId == lesson.id);
+    final theme = Theme.of(context);
 
     return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
         title: Text(lesson.title),
         centerTitle: true,
-        backgroundColor: Colors.white,
-        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_rounded),
           onPressed: () => provider.exitLesson(),
@@ -54,14 +54,15 @@ class ReviewScreen extends StatelessWidget {
             ),
           ),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
             decoration: BoxDecoration(
               color: Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 16,
+                  offset: const Offset(0, -8),
                 ),
               ],
             ),
@@ -73,7 +74,9 @@ class ReviewScreen extends StatelessWidget {
                   provider.startLesson(lesson); // Re-practice
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.secondary,
+                  backgroundColor: theme.colorScheme.secondary,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                 ),
                 child: const Text('Qayta mashq qilish'),
               ),

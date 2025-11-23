@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  static const Color primaryBlue = Color(0xFF00B4D8);
-  static const Color primaryDarkBlue = Color(0xFF0077B6);
-  static const Color accentPink = Color(0xFFFF006E);
-  static const Color accentYellow = Color(0xFFFFD60A);
+  static const Color primaryBlue = Color(0xFF4D8CFF);
+  static const Color accentPink = Color(0xFFFF7AD1);
+  static const Color accentYellow = Color(0xFFFFD166);
   static const Color backgroundWhite = Colors.white;
-  static const Color surfaceGrey = Color(0xFFF8F9FA);
-  static const Color textDark = Color(0xFF1A1A1A);
-  static const Color textGrey = Color(0xFF8E8E8E);
+  static const Color surfaceGrey = Color(0xFFF6F8FB);
+  static const Color textDark = Color(0xFF0F172A);
+  static const Color textGrey = Color(0xFF6B7280);
 
   static ThemeData get lightTheme {
     return ThemeData(
@@ -23,32 +22,22 @@ class AppTheme {
         secondary: accentPink,
         tertiary: accentYellow,
         surface: surfaceGrey,
-        // background is deprecated, using surface instead
       ),
       textTheme: GoogleFonts.outfitTextTheme().copyWith(
-        displayLarge: GoogleFonts.outfit(
-          fontSize: 32,
-          fontWeight: FontWeight.bold,
-          color: textDark,
-        ),
-        displayMedium: GoogleFonts.outfit(
-          fontSize: 28,
-          fontWeight: FontWeight.bold,
-          color: textDark,
-        ),
-        titleLarge: GoogleFonts.outfit(
-          fontSize: 22,
-          fontWeight: FontWeight.bold,
-          color: textDark,
-        ),
-        bodyLarge: GoogleFonts.outfit(
-          fontSize: 16,
-          color: textDark,
-        ),
-        bodyMedium: GoogleFonts.outfit(
-          fontSize: 14,
-          color: textDark,
-        ),
+        displayLarge: GoogleFonts.outfit(fontSize: 34, fontWeight: FontWeight.w800, color: textDark),
+        displayMedium: GoogleFonts.outfit(fontSize: 30, fontWeight: FontWeight.w800, color: textDark),
+        titleLarge: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w700, color: textDark),
+        titleMedium: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: textDark),
+        bodyLarge: GoogleFonts.outfit(fontSize: 16, color: textDark),
+        bodyMedium: GoogleFonts.outfit(fontSize: 14, color: textGrey),
+        labelLarge: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700, color: textDark),
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: backgroundWhite,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        foregroundColor: textDark,
+        centerTitle: true,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -65,15 +54,15 @@ class AppTheme {
           ),
         ),
       ),
-      // cardTheme: CardTheme(
-      //   color: Colors.white,
-      //   elevation: 0,
-      //   shape: RoundedRectangleBorder(
-      //     borderRadius: BorderRadius.circular(24),
-      //     side: BorderSide(color: Colors.grey.shade100, width: 1),
-      //   ),
-      //   margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      // ),
+      cardTheme: CardThemeData(
+        color: backgroundWhite,
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+          side: BorderSide(color: surfaceGrey),
+        ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: surfaceGrey,

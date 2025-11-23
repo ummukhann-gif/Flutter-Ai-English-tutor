@@ -1,21 +1,39 @@
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/types.dart';
 
 class GeminiService {
-  // TODO: Replace with your actual API key or use --dart-define=API_KEY=...
-  static const String _apiKey =
-      String.fromEnvironment('API_KEY', defaultValue: '');
+  // Prefer .env, fallback to dart-define
+  static final String _apiKey =
+      dotenv.env['API_KEY'] ?? const String.fromEnvironment('API_KEY', defaultValue: '');
+  static final String _chatModelName = dotenv.env['GEMINI_CHAT_MODEL'] ??
+      const String.fromEnvironment('GEMINI_CHAT_MODEL', defaultValue: 'gemini-1.5-flash-latest');
+  static final String _planModelName = dotenv.env['GEMINI_PLAN_MODEL'] ??
+      const String.fromEnvironment('GEMINI_PLAN_MODEL', defaultValue: 'gemini-1.5-flash-latest');
+  static final String _onboardingModelName = dotenv.env['GEMINI_ONBOARDING_MODEL'] ??
+      const String.fromEnvironment('GEMINI_ONBOARDING_MODEL', defaultValue: 'gemini-1.5-flash-latest');
 
-  late final GenerativeModel _model;
+  late final GenerativeModel _chatModel;
+  late final GenerativeModel _planModel;
+  late final GenerativeModel _onboardingModel;
 
   GeminiService() {
     if (_apiKey.isEmpty) {
       print('Warning: API_KEY is not set. AI features will not work.');
     }
-    _model = GenerativeModel(
-      model:
-          'gemini-1.5-flash', // Using flash for speed/cost, or use 'gemini-pro'
+    _chatModel = GenerativeModel(
+      model: _chatModelName,
+      apiKey: _apiKey,
+    );
+
+    _planModel = GenerativeModel(
+      model: _planModelName,
+      apiKey: _apiKey,
+    );
+
+    _onboardingModel = GenerativeModel(
+      model: _onboardingModelName,
       apiKey: _apiKey,
     );
   }
@@ -45,7 +63,7 @@ class GeminiService {
 
     try {
       final content = [Content.text(prompt)];
-      final response = _model.generateContentStream(content);
+      final response = _onboardingModel.generateContentStream(content);
 
       await for (final chunk in response) {
         if (chunk.text != null) {
@@ -84,10 +102,9 @@ class GeminiService {
     ''';
 
     try {
-      // Create a model specifically for JSON generation
-      final jsonModel = GenerativeModel(
-        model: 'gemini-1.5-flash',
-        apiKey: _apiKey,
+      // Use a JSON-capable model for plan generation
+      final response = await _planModel.generateContent(
+        [Content.text(prompt)],
         generationConfig: GenerationConfig(
           responseMimeType: 'application/json',
           responseSchema: Schema.array(
@@ -120,8 +137,6 @@ class GeminiService {
           ),
         ),
       );
-
-      final response = await jsonModel.generateContent([Content.text(prompt)]);
 
       if (response.text == null) {
         throw Exception("Empty response from AI");
@@ -185,7 +200,7 @@ class GeminiService {
     ''';
 
     try {
-      final response = _model.generateContentStream([Content.text(prompt)]);
+      final response = _chatModel.generateContentStream([Content.text(prompt)]);
       await for (final chunk in response) {
         if (chunk.text != null) yield chunk.text!;
       }
