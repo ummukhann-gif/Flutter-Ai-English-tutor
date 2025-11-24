@@ -27,6 +27,7 @@ dependencies:
   permission_handler: ^11.3.0
   sound_stream: ^0.4.2
   image_picker: ^1.2.1
+  audio_session: ^0.1.25
 
 dev_dependencies:
   flutter_test:

@@ -12,6 +12,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:io';
 
 import '../models/live_models.dart';
+import 'package:audio_session/audio_session.dart';
 
 /// Advanced Gemini Live client using raw PCM streams for low-latency audio.
 ///
@@ -78,6 +79,24 @@ class LiveGeminiService {
 
   Future<void> _initAudio() async {
     try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+        avAudioSessionCategoryOptions:
+            AVAudioSessionCategoryOptions.defaultToSpeaker,
+        avAudioSessionMode: AVAudioSessionMode.videoChat,
+        avAudioSessionRouteSharingPolicy:
+            AVAudioSessionRouteSharingPolicy.defaultPolicy,
+        avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.speech,
+          flags: AndroidAudioFlags.none,
+          usage: AndroidAudioUsage.voiceCommunication,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+        androidWillPauseWhenDucked: true,
+      ));
+
       await _player.initialize(sampleRate: 24000);
       debugPrint('✓ Audio player initialized (24kHz)');
 
@@ -298,11 +317,14 @@ class LiveGeminiService {
             }
           }
 
-          // Text fallback
+          // Text fallback - REMOVED to prevent showing internal thoughts/reasoning
+          // The outputTranscription field should be sufficient for spoken text.
+          /*
           final textPart = part.text;
           if (textPart != null && textPart.isNotEmpty) {
             _outputTranscriptCtrl.add(textPart);
           }
+          */
         }
       }
 
@@ -324,8 +346,18 @@ class LiveGeminiService {
     }
   }
 
-  /// Start microphone stream
+  bool _isMicMuted = false;
+
+  /// Start microphone stream (or unmute if already running)
   Future<void> startMicStream() async {
+    // If already recording (subscription exists), just unmute
+    if (_micSub != null) {
+      _isMicMuted = false;
+      _connectionStateCtrl.add(LiveState.recording);
+      debugPrint('🎤 Microphone unmuted');
+      return;
+    }
+
     if (_channel == null) {
       debugPrint('⚠ No connection, attempting to connect...');
       await connect();
@@ -346,8 +378,21 @@ class LiveGeminiService {
         debugPrint('Player already running: $e');
       }
 
+      _isMicMuted = false; // Ensure unmuted initially
+
       _micSub = _recorder.audioStream.listen(
         (chunk) {
+          // SOFTWARE MUTE LOGIC
+          // We must ALWAYS process the chunk to drain the buffer,
+          // but only send it if not muted.
+
+          if (_isMicMuted) {
+            // Just drain, do nothing.
+            // Optionally we could still calculate volume for "ambient" visuals,
+            // but for now let's just drop it to be safe.
+            return;
+          }
+
           try {
             final bytes = Uint8List.fromList(chunk);
             final samples = Int16List.view(bytes.buffer);
@@ -387,22 +432,17 @@ class LiveGeminiService {
   }
 
   Future<void> stopMicStream() async {
-    try {
-      await _micSub?.cancel();
-      _micSub = null;
+    // SOFTWARE MUTE: Just stop sending data, but keep recorder running
+    // This ensures we don't cut off audio, and more importantly,
+    // we keep draining the buffer so old audio doesn't pile up.
+    _isMicMuted = true;
 
-      try {
-        await _recorder.stop();
-      } catch (e) {
-        debugPrint('Recorder already stopped: $e');
-      }
+    // Send a burst of silence to help VAD detect end of speech
+    _sendSilenceKick();
 
-      _connectionStateCtrl.add(LiveState.ready);
-      debugPrint('🎤 Recording stopped');
-    } catch (e) {
-      debugPrint('Error stopping microphone: $e');
-      _connectionStateCtrl.add(LiveState.ready);
-    }
+    // Update state to Ready so UI knows we are "done" listening
+    _connectionStateCtrl.add(LiveState.ready);
+    debugPrint('🎤 Microphone muted (software) + Silence Kick');
   }
 
   Future<void> interrupt() async {

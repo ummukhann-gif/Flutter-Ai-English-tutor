@@ -43,9 +43,10 @@ class _TutorScreenState extends State<TutorScreen>
     _live = LiveGeminiService();
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1000),
     )..repeat(reverse: true);
 
+    // Auto-connect when entering the screen
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startLesson();
     });
@@ -91,9 +92,11 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
 
     _inputSub = _live.inputTranscriptStream.listen((text) {
       final current = context.read<AppProvider>().currentLesson;
+      // When receiving transcript from voice, we might want to merge if it's a continuous flow,
+      // but usually, a new transcript packet implies a new phrase.
+      // However, for stability, let's keep merging for voice transcripts unless silence broke it.
       if (current != null) _appendMessage(Speaker.user, text, current.id);
 
-      // Clear streaming text when user speaks (new turn)
       if (_streamingText.isNotEmpty) {
         setState(() => _streamingText = '');
       }
@@ -105,7 +108,6 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
         _appendMessage(Speaker.ai, text, current.id);
 
         setState(() {
-          // If text contains completion token, don't show it in karaoke
           if (text.contains('LESSON_COMPLETE')) {
             _handleCompletion(text, current);
           } else {
@@ -122,7 +124,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
         _liveState = state;
 
         if (state == LiveState.recording) {
-          _streamingText = ''; // Clear text when recording starts
+          _streamingText = '';
         }
       });
     });
@@ -135,14 +137,19 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
     });
   }
 
-  void _appendMessage(Speaker speaker, String text, String lessonId) {
+  void _appendMessage(Speaker speaker, String text, String lessonId,
+      {bool forceNewBubble = false}) {
     if (!mounted) return;
 
     final provider = context.read<AppProvider>();
     final history =
         List<Conversation>.from(provider.history.conversations[lessonId] ?? []);
 
-    if (history.isNotEmpty && history.last.speaker == speaker) {
+    // Only merge if it's the AI speaking (streaming) OR if it's the user speaking via voice (transcript stream).
+    // If forceNewBubble is true (e.g. manual send or image), we always create a new bubble.
+    if (!forceNewBubble &&
+        history.isNotEmpty &&
+        history.last.speaker == speaker) {
       final last = history.last;
       history[history.length - 1] = Conversation(
         speaker: last.speaker,
@@ -212,9 +219,9 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
     final lesson = provider.currentLesson;
     if (lesson == null) return;
     await _ensureConnected();
-    _appendMessage(Speaker.user, text, lesson.id);
+    _appendMessage(Speaker.user, text, lesson.id, forceNewBubble: true);
     _live.sendText(text);
-    setState(() => _streamingText = ''); // Clear previous AI text
+    setState(() => _streamingText = '');
   }
 
   Future<void> _handleImageSelection() async {
@@ -235,7 +242,8 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
         final provider = context.read<AppProvider>();
         final lesson = provider.currentLesson;
         if (lesson != null) {
-          _appendMessage(Speaker.user, '[Sent an image]', lesson.id);
+          _appendMessage(Speaker.user, '[Sent an image]', lesson.id,
+              forceNewBubble: true);
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -412,7 +420,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(bottom: 48, top: 24),
+              padding: const EdgeInsets.only(bottom: 64, top: 24),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -422,29 +430,44 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                     color: Colors.grey.shade100,
                     iconColor: Colors.black87,
                   ),
-                  const SizedBox(width: 32),
-                  GestureDetector(
-                    onTapDown: (_) async {
-                      if (!_isReady) return;
+
+                  const SizedBox(width: 40),
+
+                  Listener(
+                    onPointerDown: (_) async {
+                      if (_liveState == LiveState.connecting) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Connecting... please wait')),
+                        );
+                        return;
+                      }
+
+                      if (!_isReady) {
+                        HapticFeedback.lightImpact();
+                        await _ensureConnected();
+                        return;
+                      }
+
                       HapticFeedback.lightImpact();
                       await _ensureConnected();
                       await _live.startMicStream();
                       setState(() => _isMicOn = true);
                     },
-                    onTapUp: (_) {
-                      _live.stopMicStream();
+                    onPointerUp: (_) async {
+                      await _live.stopMicStream();
                       setState(() => _isMicOn = false);
                     },
-                    onTapCancel: () {
-                      _live.stopMicStream();
+                    onPointerCancel: (_) async {
+                      await _live.stopMicStream();
                       setState(() => _isMicOn = false);
                     },
                     child: AnimatedBuilder(
                       animation: _pulseController,
                       builder: (context, child) {
                         return Container(
-                          width: 80,
-                          height: 80,
+                          width: 90,
+                          height: 90,
                           decoration: BoxDecoration(
                             color: Colors.black,
                             shape: BoxShape.circle,
@@ -458,24 +481,29 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                                           5 + (5 * _pulseController.value),
                                     )
                                   ]
-                                : [],
+                                : [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    )
+                                  ],
                           ),
                           child: Icon(
                             _isMicOn ? Icons.graphic_eq : Icons.mic_rounded,
                             color: Colors.white,
-                            size: 32,
+                            size: 36,
                           ),
                         );
                       },
                     ),
                   ),
-                  const SizedBox(width: 32),
-                  _buildCircleButton(
-                    icon: Icons.more_horiz_rounded,
-                    onTap: () {},
-                    color: Colors.grey.shade100,
-                    iconColor: Colors.black87,
-                  ),
+
+                  const SizedBox(width: 40),
+
+                  // Placeholder for symmetry, or we can remove it.
+                  // User asked to remove the "three dots".
+                  const SizedBox(width: 56),
                 ],
               ),
             ),
