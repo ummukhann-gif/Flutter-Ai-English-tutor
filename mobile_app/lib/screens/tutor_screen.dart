@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../models/types.dart';
@@ -15,16 +17,21 @@ class TutorScreen extends StatefulWidget {
   State<TutorScreen> createState() => _TutorScreenState();
 }
 
-class _TutorScreenState extends State<TutorScreen> {
+class _TutorScreenState extends State<TutorScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ImagePicker _picker = ImagePicker();
 
   bool _isMicOn = false;
   bool _isReady = false;
   bool _isTextMode = false;
   LiveState _liveState = LiveState.disconnected;
+  String _streamingText = '';
 
   late final LiveGeminiService _live;
+  late AnimationController _pulseController;
+
   StreamSubscription<String>? _inputSub;
   StreamSubscription<String>? _outputSub;
   StreamSubscription<LiveState>? _stateSub;
@@ -34,6 +41,11 @@ class _TutorScreenState extends State<TutorScreen> {
   void initState() {
     super.initState();
     _live = LiveGeminiService();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startLesson();
     });
@@ -49,13 +61,27 @@ class _TutorScreenState extends State<TutorScreen> {
         .map((m) => '${m.speaker == Speaker.ai ? 'Tutor' : 'User'}: ${m.text}')
         .join('\n');
 
+    final nativeLang = provider.languages?.native ?? 'Uzbek';
+    final targetLang = provider.languages?.target ?? 'English';
+
     final systemPrompt = '''
-You are a strict, professional language tutor ("ustoz") teaching a ${provider.languages?.native} speaker to learn ${provider.languages?.target}.
-Lesson title: ${lesson.title}
-Tasks: ${lesson.tasks.join('; ')}
-Vocabulary: ${lesson.vocabulary.map((v) => '${v.word} (${v.translation})').join(', ')}
-If user is silent or says "I don't know", immediately teach and make them repeat. Keep replies concise. Explain in ${provider.languages?.native} when needed, encourage speaking in ${provider.languages?.target}.
-When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and brief feedback.
+You are a strict, professional language tutor ("ustoz") teaching a $nativeLang speaker to learn $targetLang.
+
+**CRITICAL RULES (MUST FOLLOW):**
+1.  **ZERO TOLERANCE FOR IGNORANCE**: If the user says "I don't know", "Bilmayman", "No", or stays silent, you MUST NOT say "Good job" or "Barakalla". Instead, IMMEDIATELY teach them the answer and make them repeat it.
+2.  **CORRECT MISTAKES INSTANTLY**: If the user makes a pronunciation or grammar mistake, stop and correct them. Do not praise incorrect attempts.
+3.  **SHORT & CLEAR**: Keep your responses concise. Focus on the lesson tasks.
+4.  **USE $nativeLang FOR EXPLANATIONS**: Explain complex concepts in $nativeLang, but encourage the user to speak in $targetLang.
+5.  **NO INTERNAL THOUGHTS**: Output ONLY what you want to say to the student. Do not output thinking processes.
+6.  **VISION CAPABILITIES**: You can see images the user sends. If they send an image of a book or text, read it and help them. Use the image as context for the lesson.
+
+**YOUR LESSON PLAN:**
+- Lesson Title: ${lesson.title}
+- Tasks: ${lesson.tasks.join('; ')}
+- Vocabulary: ${lesson.vocabulary.map((v) => '${v.word} (${v.translation})').join(', ')}
+
+**LESSON COMPLETION:**
+When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a new line, followed by a score (1-10) and brief feedback.
 ''';
 
     await _live.connect(
@@ -66,15 +92,26 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
     _inputSub = _live.inputTranscriptStream.listen((text) {
       final current = context.read<AppProvider>().currentLesson;
       if (current != null) _appendMessage(Speaker.user, text, current.id);
+
+      // Clear streaming text when user speaks (new turn)
+      if (_streamingText.isNotEmpty) {
+        setState(() => _streamingText = '');
+      }
     });
 
     _outputSub = _live.outputTranscriptStream.listen((text) {
       final current = context.read<AppProvider>().currentLesson;
       if (current != null) {
         _appendMessage(Speaker.ai, text, current.id);
-        if (text.contains('LESSON_COMPLETE')) {
-          _handleCompletion(text, current);
-        }
+
+        setState(() {
+          // If text contains completion token, don't show it in karaoke
+          if (text.contains('LESSON_COMPLETE')) {
+            _handleCompletion(text, current);
+          } else {
+            _streamingText += text;
+          }
+        });
       }
     });
 
@@ -83,6 +120,10 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
         _isReady = state == LiveState.ready || state == LiveState.recording;
         _isMicOn = state == LiveState.recording;
         _liveState = state;
+
+        if (state == LiveState.recording) {
+          _streamingText = ''; // Clear text when recording starts
+        }
       });
     });
 
@@ -96,31 +137,26 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
 
   void _appendMessage(Speaker speaker, String text, String lessonId) {
     if (!mounted) return;
-    
-    final provider = context.read<AppProvider>();
-    final history = List<Conversation>.from(
-        provider.history.conversations[lessonId] ?? []);
 
-    // Check if we should append to existing message or create new one
-    // For streaming responses, we append. For new messages, we create.
+    final provider = context.read<AppProvider>();
+    final history =
+        List<Conversation>.from(provider.history.conversations[lessonId] ?? []);
+
     if (history.isNotEmpty && history.last.speaker == speaker) {
-      // Append to existing message (streaming)
       final last = history.last;
       history[history.length - 1] = Conversation(
         speaker: last.speaker,
-        text: last.text + text, // APPEND, not replace!
+        text: last.text + text,
         timestamp: last.timestamp,
       );
     } else {
-      // New message from different speaker
       history.add(
         Conversation(speaker: speaker, text: text, timestamp: DateTime.now()),
       );
     }
 
     provider.updateConversationHistory(lessonId, history);
-    
-    // Scroll to bottom after a short delay to ensure UI updates
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
     });
@@ -165,25 +201,7 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
 
   Future<void> _ensureConnected() async {
     if (_isReady) return;
-    final provider = context.read<AppProvider>();
-    final lesson = provider.currentLesson;
-    if (lesson == null) return;
-    final history = provider.history.conversations[lesson.id] ?? [];
-    final historyText = history
-        .map((m) => '${m.speaker == Speaker.ai ? 'Tutor' : 'User'}: ${m.text}')
-        .join('\n');
-    final systemPrompt = '''
-You are a strict, professional language tutor ("ustoz") teaching a ${provider.languages?.native} speaker to learn ${provider.languages?.target}.
-Lesson title: ${lesson.title}
-Tasks: ${lesson.tasks.join('; ')}
-Vocabulary: ${lesson.vocabulary.map((v) => '${v.word} (${v.translation})').join(', ')}
-If user is silent or says "I don't know", immediately teach and make them repeat. Keep replies concise. Explain in ${provider.languages?.native} when needed, encourage speaking in ${provider.languages?.target}.
-When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and brief feedback.
-''';
-    await _live.connect(
-      systemInstruction: systemPrompt,
-      historyContext: historyText.isEmpty ? null : historyText,
-    );
+    await _startLesson();
   }
 
   Future<void> _handleSendText() async {
@@ -196,6 +214,41 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
     await _ensureConnected();
     _appendMessage(Speaker.user, text, lesson.id);
     _live.sendText(text);
+    setState(() => _streamingText = ''); // Clear previous AI text
+  }
+
+  Future<void> _handleImageSelection() async {
+    try {
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
+      );
+
+      if (image != null) {
+        final bytes = await image.readAsBytes();
+        await _ensureConnected();
+
+        await _live.sendImage(bytes, mimeType: 'image/jpeg');
+
+        final provider = context.read<AppProvider>();
+        final lesson = provider.currentLesson;
+        if (lesson != null) {
+          _appendMessage(Speaker.user, '[Sent an image]', lesson.id);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image sent to AI Tutor')),
+        );
+        setState(() => _streamingText = '');
+      }
+    } catch (e) {
+      debugPrint('Error picking image: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to pick image: $e')),
+      );
+    }
   }
 
   void _scrollToBottom() {
@@ -217,6 +270,7 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
     _live.dispose();
     _scrollController.dispose();
     _textController.dispose();
+    _pulseController.dispose();
     super.dispose();
   }
 
@@ -238,172 +292,215 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
     );
   }
 
-  Widget _statusPill(ThemeData theme) {
-    final pillColor = switch (_liveState) {
-      LiveState.ready || LiveState.recording => Colors.green,
-      LiveState.connecting => Colors.orange,
-      LiveState.disconnected => Colors.grey,
-    };
-    final label = switch (_liveState) {
-      LiveState.recording => 'Recording',
-      LiveState.ready => 'Ready',
-      LiveState.connecting => 'Connecting',
-      LiveState.disconnected => 'Disconnected',
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: pillColor.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 8,
-            height: 8,
+  Widget _buildLiveView(ThemeData theme, Lesson lesson, AppProvider provider) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Container(
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: pillColor,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.blue.shade50.withOpacity(0.3),
+                  Colors.white,
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 6),
-          Text(label, style: theme.textTheme.labelMedium),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLiveView(
-      ThemeData theme, Lesson lesson, AppProvider provider) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 24),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new),
-                  onPressed: () => provider.exitLesson(),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: () => setState(() => _isTextMode = true),
-                  child: const Text('Chat'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text('You: Student',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700, fontSize: 20)),
-          const SizedBox(height: 4),
-          Text('Tutor: AI Ustoz',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700, fontSize: 20)),
-          const SizedBox(height: 24),
-          _statusPill(theme),
-          const SizedBox(height: 12),
-          Text(
-            _isReady ? 'Hold to Speak' : 'Connecting...',
-            style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey.shade700),
-          ),
-          const SizedBox(height: 16),
-          GestureDetector(
-            onTapDown: (_) async {
-              if (!_isReady) return;
-              await _ensureConnected();
-              await _live.startMicStream();
-              setState(() => _isMicOn = true);
-            },
-            onTapUp: (_) {
-              _live.stopMicStream();
-              setState(() => _isMicOn = false);
-            },
-            onTapCancel: () {
-              _live.stopMicStream();
-              setState(() => _isMicOn = false);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 220,
-              height: 220,
-              decoration: BoxDecoration(
-                color: Colors.blueAccent,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.blueAccent.withOpacity(0.35),
-                    blurRadius: 22,
-                    offset: const Offset(0, 10),
+        ),
+        Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        size: 28, color: Colors.black87),
+                    onPressed: () => provider.exitLesson(),
+                  ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: _liveState == LiveState.ready ||
+                                    _liveState == LiveState.recording
+                                ? Colors.green
+                                : Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _liveState == LiveState.recording
+                              ? 'Listening'
+                              : 'Live',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chat_bubble_outline_rounded,
+                        size: 26, color: Colors.black87),
+                    onPressed: () => setState(() => _isTextMode = true),
                   ),
                 ],
               ),
-              alignment: Alignment.center,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: _isMicOn ? 160 : 140,
-                height: _isMicOn ? 160 : 140,
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  _isMicOn ? Icons.mic : Icons.mic_none,
-                  size: 64,
-                  color: Colors.blueAccent.shade700,
+            ),
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: SingleChildScrollView(
+                    reverse: true,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: _streamingText.isNotEmpty
+                          ? Text(
+                              _streamingText,
+                              key: const ValueKey('streaming'),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87,
+                                height: 1.4,
+                              ),
+                            )
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'AI Tutor',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.grey.shade500,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _isMicOn ? 'Listening...' : 'Tap to speak',
+                                  style: TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 32),
-          Text('Live tutor',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: Colors.grey.shade700)),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(54),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(28),
-                ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 48, top: 24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildCircleButton(
+                    icon: Icons.camera_alt_outlined,
+                    onTap: _handleImageSelection,
+                    color: Colors.grey.shade100,
+                    iconColor: Colors.black87,
+                  ),
+                  const SizedBox(width: 32),
+                  GestureDetector(
+                    onTapDown: (_) async {
+                      if (!_isReady) return;
+                      HapticFeedback.lightImpact();
+                      await _ensureConnected();
+                      await _live.startMicStream();
+                      setState(() => _isMicOn = true);
+                    },
+                    onTapUp: (_) {
+                      _live.stopMicStream();
+                      setState(() => _isMicOn = false);
+                    },
+                    onTapCancel: () {
+                      _live.stopMicStream();
+                      setState(() => _isMicOn = false);
+                    },
+                    child: AnimatedBuilder(
+                      animation: _pulseController,
+                      builder: (context, child) {
+                        return Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            shape: BoxShape.circle,
+                            boxShadow: _isMicOn
+                                ? [
+                                    BoxShadow(
+                                      color: Colors.blue.withOpacity(0.3),
+                                      blurRadius:
+                                          20 + (10 * _pulseController.value),
+                                      spreadRadius:
+                                          5 + (5 * _pulseController.value),
+                                    )
+                                  ]
+                                : [],
+                          ),
+                          child: Icon(
+                            _isMicOn ? Icons.graphic_eq : Icons.mic_rounded,
+                            color: Colors.white,
+                            size: 32,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 32),
+                  _buildCircleButton(
+                    icon: Icons.more_horiz_rounded,
+                    onTap: () {},
+                    color: Colors.grey.shade100,
+                    iconColor: Colors.black87,
+                  ),
+                ],
               ),
-              onPressed: () => provider.exitLesson(),
-              child: const Text('End Conversation'),
             ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, -6),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                Text('I\'m Stuck',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(color: Colors.black87)),
-                Text('Word Bank',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(color: Colors.black87)),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCircleButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required Color color,
+    required Color iconColor,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: iconColor, size: 24),
       ),
     );
   }
@@ -413,30 +510,20 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new),
-                onPressed: () => context.read<AppProvider>().exitLesson(),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(lesson.title, style: theme.textTheme.titleLarge),
-                    Text('Text chat',
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: Colors.grey)),
-                  ],
-                ),
-              ),
-              _statusPill(theme),
-              const SizedBox(width: 8),
-              TextButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 22),
                 onPressed: () => setState(() => _isTextMode = false),
-                child: const Text('Live'),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Chat',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -444,75 +531,57 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
         Expanded(
           child: ListView.builder(
             controller: _scrollController,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             itemCount: history.length,
             itemBuilder: (context, index) {
               return ChatBubble(message: history[index]);
             },
           ),
         ),
-        _chatInput(theme),
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Colors.grey.shade100)),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.add_photo_alternate_outlined,
+                    color: Colors.grey),
+                onPressed: _handleImageSelection,
+              ),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: TextField(
+                    controller: _textController,
+                    decoration: const InputDecoration(
+                      hintText: 'Type a message...',
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onSubmitted: (_) => _handleSendText(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              CircleAvatar(
+                backgroundColor: Colors.blueAccent,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_upward_rounded,
+                      color: Colors.white, size: 20),
+                  onPressed: _handleSendText,
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
-    );
-  }
-
-  Widget _chatInput(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 16,
-            offset: const Offset(0, -8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _textController,
-              decoration: InputDecoration(
-                hintText: 'Javobingizni yozing...',
-                fillColor: theme.colorScheme.surface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(28),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              ),
-              onSubmitted: (_) => _handleSendText(),
-              enabled: _isReady,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  theme.colorScheme.primary,
-                  theme.colorScheme.secondary,
-                ],
-              ),
-              borderRadius: BorderRadius.circular(30),
-              boxShadow: [
-                BoxShadow(
-                  color: theme.colorScheme.primary.withOpacity(0.3),
-                  blurRadius: 10,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.send_rounded, color: Colors.white),
-              onPressed: _isReady ? _handleSendText : null,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -525,37 +594,57 @@ class _CompletionDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(32.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.12),
+                color: Colors.green.shade50,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.emoji_events, color: Colors.green, size: 36),
+              child: Icon(Icons.check_rounded,
+                  color: Colors.green.shade600, size: 40),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Lesson Complete',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            Text('Lesson Complete!', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text('Score: ${score.score}/10',
-                style: theme.textTheme.headlineSmall?.copyWith(color: Colors.green)),
-            const SizedBox(height: 12),
-            Text(score.feedback,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium),
-            const SizedBox(height: 20),
+            Text(
+              'Score: ${score.score}/10',
+              style: TextStyle(
+                  fontSize: 20,
+                  color: Colors.green.shade600,
+                  fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              score.feedback,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600, height: 1.5),
+            ),
+            const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,
+              height: 50,
               child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  elevation: 0,
+                ),
                 onPressed: onNext,
-                child: const Text('Continue'),
+                child: const Text('Continue',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               ),
             ),
           ],
