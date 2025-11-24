@@ -95,25 +95,35 @@ When lesson ends, say "LESSON_COMPLETE" on a new line, then score (1-10) and bri
   }
 
   void _appendMessage(Speaker speaker, String text, String lessonId) {
+    if (!mounted) return;
+    
     final provider = context.read<AppProvider>();
     final history = List<Conversation>.from(
         provider.history.conversations[lessonId] ?? []);
 
+    // Check if we should append to existing message or create new one
+    // For streaming responses, we append. For new messages, we create.
     if (history.isNotEmpty && history.last.speaker == speaker) {
+      // Append to existing message (streaming)
       final last = history.last;
       history[history.length - 1] = Conversation(
         speaker: last.speaker,
-        text: text,
+        text: last.text + text, // APPEND, not replace!
         timestamp: last.timestamp,
       );
     } else {
+      // New message from different speaker
       history.add(
         Conversation(speaker: speaker, text: text, timestamp: DateTime.now()),
       );
     }
 
     provider.updateConversationHistory(lessonId, history);
-    _scrollToBottom();
+    
+    // Scroll to bottom after a short delay to ensure UI updates
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
+    });
   }
 
   Future<void> _handleCompletion(String text, Lesson lesson) async {
