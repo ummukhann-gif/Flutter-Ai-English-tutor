@@ -11,8 +11,10 @@ import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:io';
 
+import '../models/live_models.dart';
+
 /// Advanced Gemini Live client using raw PCM streams for low-latency audio.
-/// 
+///
 /// Improved based on flutter_gemini_live package implementation.
 class LiveGeminiService {
   LiveGeminiService({
@@ -20,8 +22,9 @@ class LiveGeminiService {
     String? model,
     String? systemInstruction,
   })  : _apiKey = (apiKey ??
-            dotenv.env['API_KEY'] ??
-            const String.fromEnvironment('API_KEY', defaultValue: '')).trim(),
+                dotenv.env['API_KEY'] ??
+                const String.fromEnvironment('API_KEY', defaultValue: ''))
+            .trim(),
         _model = model ??
             dotenv.env['GEMINI_LIVE_MODEL'] ??
             const String.fromEnvironment(
@@ -59,7 +62,7 @@ class LiveGeminiService {
   static const _silenceThreshold = 500.0;
   static const _maxReconnectAttempts = 3;
   static const _apiVersion = 'v1beta';
-  
+
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
   bool _isAiSpeaking = false;
@@ -160,21 +163,22 @@ class LiveGeminiService {
       );
 
       // Send setup message
-      final modelName = _model.startsWith('models/') ? _model : 'models/$_model';
+      final modelName =
+          _model.startsWith('models/') ? _model : 'models/$_model';
 
-      final setup = {
-        'setup': {
-          'model': modelName,
-          'generationConfig': {
-            'responseModalities': ['AUDIO'],
-            'temperature': 0.7,
-            'speechConfig': {
+      final setupMsg = LiveClientMessage(
+        setup: LiveClientSetup(
+          model: modelName,
+          generationConfig: GenerationConfig(
+            responseModalities: ['AUDIO'],
+            temperature: 0.7,
+            speechConfig: {
               'voiceConfig': {
                 'prebuiltVoiceConfig': {'voiceName': 'Zephyr'}
               }
-            }
-          },
-          'systemInstruction': {
+            },
+          ),
+          systemInstruction: {
             'parts': [
               {
                 'text': [
@@ -185,13 +189,11 @@ class LiveGeminiService {
               }
             ]
           },
-          'inputAudioTranscription': {},
-          'outputAudioTranscription': {},
-        }
-      };
+        ),
+      );
 
       debugPrint('📤 Sending Setup with model: $modelName');
-      _channel!.sink.add(jsonEncode(setup));
+      _sendMessage(setupMsg);
 
       // Wait for setup complete with timeout
       await setupCompleter.future.timeout(
@@ -216,17 +218,28 @@ class LiveGeminiService {
     }
   }
 
+  void _sendMessage(LiveClientMessage message) {
+    if (_channel == null) return;
+    try {
+      final jsonString = jsonEncode(message.toJson());
+      _channel!.sink.add(jsonString);
+    } catch (e) {
+      debugPrint('Error sending message: $e');
+    }
+  }
+
   void _handleMessage(dynamic data, Completer<void>? setupCompleter) {
     try {
       // Handle both String and List<int> (Uint8List)
       final jsonData = data is String ? data : utf8.decode(data as List<int>);
 
-      debugPrint('📥 Received: ${jsonData.substring(0, math.min(200, jsonData.length))}...');
+      // debugPrint('📥 Received: ${jsonData.substring(0, math.min(200, jsonData.length))}...');
 
-      final msg = jsonDecode(jsonData) as Map<String, dynamic>;
+      final jsonMap = jsonDecode(jsonData) as Map<String, dynamic>;
+      final msg = LiveServerMessage.fromJson(jsonMap);
 
       // Setup complete
-      if (msg['setupComplete'] != null) {
+      if (msg.setupComplete != null) {
         if (setupCompleter != null && !setupCompleter.isCompleted) {
           setupCompleter.complete();
         }
@@ -240,7 +253,7 @@ class LiveGeminiService {
       }
 
       // Server interruption
-      if (msg['serverContent']?['interrupted'] == true) {
+      if (msg.serverContent?.interrupted == true) {
         _isAiSpeaking = false;
         try {
           _player.stop();
@@ -252,28 +265,27 @@ class LiveGeminiService {
       }
 
       // Input transcription (User)
-      final inputText = msg['serverContent']?['inputTranscription']?['text'];
-      if (inputText is String && inputText.isNotEmpty) {
+      final inputText = msg.serverContent?.inputTranscription?.text;
+      if (inputText != null && inputText.isNotEmpty) {
         _inputTranscriptCtrl.add(inputText);
         debugPrint('👤 User: $inputText');
       }
 
       // Output transcription (AI)
-      final outputText = msg['serverContent']?['outputTranscription']?['text'];
-      if (outputText is String && outputText.isNotEmpty) {
+      final outputText = msg.serverContent?.outputTranscription?.text;
+      if (outputText != null && outputText.isNotEmpty) {
         _outputTranscriptCtrl.add(outputText);
         debugPrint('🤖 AI: $outputText');
       }
 
       // Audio output
-      final parts = msg['serverContent']?['modelTurn']?['parts'];
-      if (parts is List && parts.isNotEmpty) {
+      final parts = msg.serverContent?.modelTurn?.parts;
+      if (parts != null && parts.isNotEmpty) {
         for (final part in parts) {
-          final inline = part['inlineData'];
-          if (inline != null && inline['data'] != null) {
+          final inline = part.inlineData;
+          if (inline != null) {
             try {
-              final base64Data = inline['data'] as String;
-              final pcm = base64Decode(base64Data);
+              final pcm = base64Decode(inline.data);
 
               if (!_isAiSpeaking) {
                 _isAiSpeaking = true;
@@ -287,24 +299,24 @@ class LiveGeminiService {
           }
 
           // Text fallback
-          final textPart = part['text'];
-          if (textPart is String && textPart.isNotEmpty) {
+          final textPart = part.text;
+          if (textPart != null && textPart.isNotEmpty) {
             _outputTranscriptCtrl.add(textPart);
           }
         }
       }
 
       // Turn complete
-      if (msg['serverContent']?['turnComplete'] == true) {
+      if (msg.serverContent?.turnComplete == true) {
         _isAiSpeaking = false;
         debugPrint('✓ Turn Complete');
       }
 
       // Error handling
-      if (msg['error'] != null) {
-        final error = msg['error'];
-        debugPrint('❌ Server error: $error');
-        _errorCtrl.add('Server error: ${error['message'] ?? error}');
+      if (msg.error != null) {
+        debugPrint('❌ Server error: ${msg.error}');
+        _errorCtrl
+            .add('Server error: ${msg.error?['message'] ?? 'Unknown error'}');
       }
     } catch (e, st) {
       debugPrint('Error handling message: $e\n$st');
@@ -414,15 +426,13 @@ class LiveGeminiService {
     if (_channel == null) return;
 
     try {
-      final msg = {
-        'realtimeInput': {
-          'audio': {
-            'mimeType': 'audio/pcm;rate=16000',
-            'data': base64Encode(chunk),
-          }
-        }
-      };
-      _channel!.sink.add(jsonEncode(msg));
+      final msg = LiveClientMessage(
+        realtimeInput: LiveClientRealtimeInput(
+          audio:
+              Blob(mimeType: 'audio/pcm;rate=16000', data: base64Encode(chunk)),
+        ),
+      );
+      _sendMessage(msg);
     } catch (e) {
       debugPrint('Error sending PCM chunk: $e');
     }
@@ -440,20 +450,18 @@ class LiveGeminiService {
     await interrupt();
 
     try {
-      final msg = {
-        'clientContent': {
-          'turns': [
-            {
-              'role': 'user',
-              'parts': [
-                {'text': text.trim()}
-              ],
-            }
+      final msg = LiveClientMessage(
+        clientContent: LiveClientContent(
+          turns: [
+            Content(
+              role: 'user',
+              parts: [Part(text: text.trim())],
+            )
           ],
-          'turnComplete': true
-        }
-      };
-      _channel!.sink.add(jsonEncode(msg));
+          turnComplete: true,
+        ),
+      );
+      _sendMessage(msg);
       debugPrint('📤 Sent text: ${text.trim()}');
     } catch (e) {
       debugPrint('Error sending text: $e');
@@ -461,21 +469,19 @@ class LiveGeminiService {
     }
   }
 
-  Future<void> sendImage(Uint8List imageBytes, {String mimeType = 'image/jpeg'}) async {
+  Future<void> sendImage(Uint8List imageBytes,
+      {String mimeType = 'image/jpeg'}) async {
     if (_channel == null || imageBytes.isEmpty) return;
 
     try {
-      final msg = {
-        'realtimeInput': {
-          'mediaChunks': [
-            {
-              'mimeType': mimeType,
-              'data': base64Encode(imageBytes),
-            }
-          ]
-        }
-      };
-      _channel!.sink.add(jsonEncode(msg));
+      final msg = LiveClientMessage(
+        realtimeInput: LiveClientRealtimeInput(
+          mediaChunks: [
+            Blob(mimeType: mimeType, data: base64Encode(imageBytes)),
+          ],
+        ),
+      );
+      _sendMessage(msg);
       debugPrint('📤 Sent image (${imageBytes.length} bytes)');
 
       _sendSilenceKick();
@@ -520,7 +526,8 @@ class LiveGeminiService {
     _reconnectAttempts++;
     final delay = Duration(seconds: math.min(_reconnectAttempts * 2, 10));
 
-    debugPrint('🔄 Attempting reconnect $_reconnectAttempts/$_maxReconnectAttempts in ${delay.inSeconds}s...');
+    debugPrint(
+        '🔄 Attempting reconnect $_reconnectAttempts/$_maxReconnectAttempts in ${delay.inSeconds}s...');
 
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(delay, () async {
@@ -592,7 +599,8 @@ class LiveGeminiService {
   }
 
   void _onDone() {
-    final ioChannel = _channel is IOWebSocketChannel ? _channel as IOWebSocketChannel : null;
+    final ioChannel =
+        _channel is IOWebSocketChannel ? _channel as IOWebSocketChannel : null;
     final code = ioChannel?.innerWebSocket?.closeCode;
     final reason = ioChannel?.innerWebSocket?.closeReason;
 
@@ -604,7 +612,8 @@ class LiveGeminiService {
 
     // Only reconnect if not manually disconnected and not normal closure
     if (!_isManualDisconnect && code != null && code != 1000 && code != 1001) {
-      _errorCtrl.add('Connection closed: ${reason ?? "Unknown reason"} (code: $code)');
+      _errorCtrl.add(
+          'Connection closed: ${reason ?? "Unknown reason"} (code: $code)');
       _attemptReconnect();
     } else {
       _reconnectAttempts = 0;
@@ -628,5 +637,6 @@ extension LiveStateExtension on LiveState {
     }
   }
 
-  bool get isConnected => this == LiveState.ready || this == LiveState.recording;
+  bool get isConnected =>
+      this == LiveState.ready || this == LiveState.recording;
 }
