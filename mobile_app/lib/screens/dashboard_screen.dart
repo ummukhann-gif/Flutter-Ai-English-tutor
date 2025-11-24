@@ -26,19 +26,20 @@ class DashboardScreen extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
               child: Row(
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Mening rejam', style: theme.textTheme.labelLarge),
-                      const SizedBox(height: 4),
-                      Text(
-                        provider.learningPath ?? '',
-                        style: theme.textTheme.titleLarge,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Mening rejam', style: theme.textTheme.labelLarge),
+                        const SizedBox(height: 4),
+                        Text(
+                          provider.learningPath ?? '',
+                          style: theme.textTheme.titleLarge,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
-                  const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.refresh_rounded),
                     onPressed: () {

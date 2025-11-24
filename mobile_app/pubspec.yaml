@@ -23,6 +23,9 @@ dependencies:
   web_socket_channel: ^2.4.0
   record: ^6.1.2
   audioplayers: ^6.1.0
+  just_audio: ^0.9.42
+  permission_handler: ^11.3.0
+  sound_stream: ^0.4.2
 
 dev_dependencies:
   flutter_test:

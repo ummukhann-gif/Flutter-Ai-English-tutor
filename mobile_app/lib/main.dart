@@ -15,8 +15,8 @@ import 'screens/loading_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
-  // Avoid runtime font fetching; use bundled fonts to prevent network errors.
-  GoogleFonts.config.allowRuntimeFetching = false;
+  // Allow runtime fetching so GoogleFonts doesn't crash if assets are missing.
+  GoogleFonts.config.allowRuntimeFetching = true;
   runApp(const MyApp());
 }
 
