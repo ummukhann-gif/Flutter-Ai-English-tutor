@@ -254,7 +254,16 @@ class LiveGeminiService {
     interrupt();
 
     final msg = {
-      'realtimeInput': {'text': text.trim()}
+      'clientContent': {
+        'turns': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': text.trim()}
+            ],
+          }
+        ]
+      }
     };
     _channel!.sink.add(jsonEncode(msg));
     _sendSilenceKick();
@@ -263,11 +272,18 @@ class LiveGeminiService {
   void sendImage(Uint8List imageBytes, {String mimeType = 'image/jpeg'}) {
     if (_channel == null || imageBytes.isEmpty) return;
     final msg = {
-      'realtimeInput': {
-        'mediaChunks': [
+      'clientContent': {
+        'turns': [
           {
-            'mimeType': mimeType,
-            'data': base64Encode(imageBytes),
+            'role': 'user',
+            'parts': [
+              {
+                'inlineData': {
+                  'mimeType': mimeType,
+                  'data': base64Encode(imageBytes),
+                }
+              }
+            ],
           }
         ]
       }
