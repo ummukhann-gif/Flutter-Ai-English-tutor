@@ -49,6 +49,7 @@ class LiveGeminiService {
   final _connectionStateCtrl = StreamController<LiveState>.broadcast();
   final _errorCtrl = StreamController<String>.broadcast();
   final _volumeCtrl = StreamController<double>.broadcast(); // For visualizer
+  static const _silenceThreshold = 500.0; // RMS under this triggers noise injection
 
   Stream<String> get inputTranscriptStream => _inputTranscriptCtrl.stream;
   Stream<String> get outputTranscriptStream => _outputTranscriptCtrl.stream;
@@ -60,8 +61,9 @@ class LiveGeminiService {
   bool _isAiSpeaking = false;
 
   Future<void> _initAudio() async {
-    await _player.initialize();
-    await _recorder.initialize();
+    // Gemini returns 24 kHz audio; we send 16 kHz
+    await _player.initialize(sampleRate: 24000);
+    await _recorder.initialize(sampleRate: 16000);
   }
 
   Future<void> connect(
@@ -191,11 +193,23 @@ class LiveGeminiService {
     await _player.start();
 
     _micSub = _recorder.audioStream.listen((chunk) {
-      // Calculate volume for visualizer
-      _calculateVolume(chunk);
+      final bytes = Uint8List.fromList(chunk);
+      final samples = Int16List.view(bytes.buffer);
+
+      // Volume for visualizer
+      final rms = _calculateRms(samples);
+      _volumeCtrl.add(_normalizeVolume(rms));
+
+      // Active noise injection: keep stream alive during silence
+      if (rms < _silenceThreshold) {
+        final rnd = math.Random();
+        for (int i = 0; i < samples.length; i++) {
+          samples[i] = (rnd.nextBool() ? 1 : -1) * rnd.nextInt(10);
+        }
+      }
 
       // Send to Gemini
-      _sendPcmChunk(Uint8List.fromList(chunk));
+      _sendPcmChunk(bytes);
     });
 
     await _recorder.start();
@@ -223,7 +237,7 @@ class LiveGeminiService {
   void _sendPcmChunk(Uint8List chunk) {
     if (_channel == null) return;
     final msg = {
-      'input': {
+      'realtimeInput': {
         'audio': {
           'data': base64Encode(chunk),
           'mimeType': 'audio/pcm;rate=16000',
@@ -240,28 +254,44 @@ class LiveGeminiService {
     interrupt();
 
     final msg = {
-      'input': {
-        'text': text.trim(),
+      'realtimeInput': {'text': text.trim()}
+    };
+    _channel!.sink.add(jsonEncode(msg));
+    _sendSilenceKick();
+  }
+
+  void sendImage(Uint8List imageBytes, {String mimeType = 'image/jpeg'}) {
+    if (_channel == null || imageBytes.isEmpty) return;
+    final msg = {
+      'realtimeInput': {
+        'mediaChunks': [
+          {
+            'mimeType': mimeType,
+            'data': base64Encode(imageBytes),
+          }
+        ]
       }
     };
     _channel!.sink.add(jsonEncode(msg));
+    _sendSilenceKick();
   }
 
-  void _calculateVolume(List<int> chunk) {
-    double sum = 0;
-    // PCM 16-bit is 2 bytes per sample.
-    for (int i = 0; i < chunk.length; i += 2) {
-      if (i + 1 >= chunk.length) break;
-      int val = chunk[i] | (chunk[i + 1] << 8);
-      // Convert to signed 16-bit
-      if (val > 32767) val -= 65536;
-      sum += val * val;
-    }
-    final rms = math.sqrt(sum / (chunk.length / 2));
-    // Normalize roughly 0.0 to 1.0 (assuming max amplitude ~32768)
-    final vol = (rms / 32768).clamp(0.0, 1.0);
-    _volumeCtrl.add(vol);
+  void _sendSilenceKick() {
+    // 0.5s of silence at 16kHz keeps the stream alive / nudges response
+    final samples = Int16List(8000); // 8000 samples = 0.5s
+    _sendPcmChunk(Uint8List.view(samples.buffer));
   }
+
+  double _calculateRms(Int16List samples) {
+    if (samples.isEmpty) return 0;
+    double sum = 0;
+    for (final s in samples) {
+      sum += s * s;
+    }
+    return math.sqrt(sum / samples.length);
+  }
+
+  double _normalizeVolume(double rms) => (rms / 32768).clamp(0.0, 1.0);
 
   Future<void> dispose() async {
     await _micSub?.cancel();
