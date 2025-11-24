@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sound_stream/sound_stream.dart';
@@ -15,9 +16,9 @@ class LiveGeminiService {
     String? apiKey,
     String? model,
     String? systemInstruction,
-  })  : _apiKey = apiKey ??
+  })  : _apiKey = (apiKey ??
             dotenv.env['API_KEY'] ??
-            const String.fromEnvironment('API_KEY', defaultValue: ''),
+            const String.fromEnvironment('API_KEY', defaultValue: '')).trim(),
         _model = model ??
             dotenv.env['GEMINI_LIVE_MODEL'] ??
             const String.fromEnvironment(
@@ -28,6 +29,9 @@ class LiveGeminiService {
         _systemInstruction = systemInstruction ??
             dotenv.env['GEMINI_LIVE_SYSTEM_PROMPT'] ??
             'You are a friendly English tutor.' {
+    if (_apiKey.isEmpty) {
+      debugPrint('CRITICAL: API_KEY is empty. Live features will fail.');
+    }
     _initAudio();
   }
 
@@ -83,6 +87,7 @@ class LiveGeminiService {
 
     _connectionStateCtrl.add(LiveState.connecting);
 
+    // The BidiGenerateContent endpoint
     final uri = Uri.parse(
       'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$_apiKey',
     );
@@ -101,15 +106,20 @@ class LiveGeminiService {
 
     _wsSub = _channel!.stream.listen(_handleMessage, onDone: _onDone,
         onError: (e, st) {
+      debugPrint('WS Stream Error: $e');
       _errorCtrl.add('WS error: $e');
       _connectionStateCtrl.add(LiveState.disconnected);
       _channel = null;
     });
 
     // Send setup
+    // Correct Model format: models/model-name
+    // Ensure the model variable has 'models/' prefix if it's not already there.
+    final modelName = _model.startsWith('models/') ? _model : 'models/$_model';
+
     final setup = {
       'setup': {
-        'model': _model,
+        'model': modelName,
         'generationConfig': {
           'responseModalities': ['AUDIO'],
           'temperature': 0.7,
@@ -129,25 +139,34 @@ class LiveGeminiService {
               ].join('\n')
             }
           ]
-        }
+        },
+        // Enable transcription with empty config objects (defaults)
+        'inputAudioTranscription': {},
+        'outputAudioTranscription': {},
       }
     };
+    debugPrint('Sending Setup: $setup');
     _channel!.sink.add(jsonEncode(setup));
   }
 
   void _handleMessage(dynamic raw) async {
     if (raw is! String) return;
     final msg = jsonDecode(raw);
+    
+    // Log message keys for debugging
+    // debugPrint('Received WS Message: ${msg.keys}');
 
     // Connection ready
     if (msg['setupComplete'] != null) {
       _connectionStateCtrl.add(LiveState.ready);
+      debugPrint('Setup Complete');
     }
 
     // Server Interruption (AI stopped talking because user interrupted)
     if (msg['serverContent']?['interrupted'] == true) {
       _isAiSpeaking = false;
       await _player.stop(); // Clear buffer immediately
+      debugPrint('AI Interrupted');
       // Don't clear transcript, just stop audio
       return;
     }
@@ -164,23 +183,40 @@ class LiveGeminiService {
       _outputTranscriptCtrl.add(outputText);
     }
 
-    // Audio output chunk
+    // Audio output handling
+    // IMPORTANT: Iterate through ALL parts.
+    // Sometimes the model sends text parts (e.g. empty thoughts) before audio parts.
     final parts = msg['serverContent']?['modelTurn']?['parts'];
     if (parts is List && parts.isNotEmpty) {
-      final inline = parts.first['inlineData'];
-      if (inline != null && inline['data'] != null) {
-        final base64Data = inline['data'] as String;
-        final pcm = base64Decode(base64Data);
+      for (final part in parts) {
+         // Check for Audio
+         final inline = part['inlineData'];
+         if (inline != null && inline['data'] != null) {
+            final base64Data = inline['data'] as String;
+            final pcm = base64Decode(base64Data);
 
-        _isAiSpeaking = true;
-        // Write raw PCM to player stream
-        _player.writeChunk(pcm);
+            if (!_isAiSpeaking) {
+               _isAiSpeaking = true;
+               // Ensure player is running
+               // _player.start(); 
+            }
+            
+            // Write raw PCM to player stream
+            _player.writeChunk(pcm);
+         }
+         
+         // Check for Text (Fallback if outputTranscription is missing/delayed)
+         final textPart = part['text'];
+         if (textPart is String && textPart.isNotEmpty) {
+             _outputTranscriptCtrl.add(textPart);
+         }
       }
     }
 
     // Turn complete
     if (msg['serverContent']?['turnComplete'] == true) {
       _isAiSpeaking = false;
+      debugPrint('Turn Complete');
     }
   }
 
@@ -236,11 +272,13 @@ class LiveGeminiService {
 
   void _sendPcmChunk(Uint8List chunk) {
     if (_channel == null) return;
+    
+    // Correct format: realtimeInput -> audio -> data (Blob)
     final msg = {
       'realtimeInput': {
         'audio': {
-          'data': base64Encode(chunk),
           'mimeType': 'audio/pcm;rate=16000',
+          'data': base64Encode(chunk),
         }
       }
     };
@@ -262,28 +300,24 @@ class LiveGeminiService {
               {'text': text.trim()}
             ],
           }
-        ]
+        ],
+        'turnComplete': true
       }
     };
     _channel!.sink.add(jsonEncode(msg));
-    _sendSilenceKick();
   }
 
   void sendImage(Uint8List imageBytes, {String mimeType = 'image/jpeg'}) {
     if (_channel == null || imageBytes.isEmpty) return;
+    
+    // For live interaction, sending image as realtimeInput allows the model to "see" it immediately
+    // akin to video frames. 
     final msg = {
-      'clientContent': {
-        'turns': [
+      'realtimeInput': {
+        'mediaChunks': [
           {
-            'role': 'user',
-            'parts': [
-              {
-                'inlineData': {
-                  'mimeType': mimeType,
-                  'data': base64Encode(imageBytes),
-                }
-              }
-            ],
+            'mimeType': mimeType,
+            'data': base64Encode(imageBytes),
           }
         ]
       }
@@ -328,6 +362,7 @@ class LiveGeminiService {
         : null;
     final code = ioChannel?.innerWebSocket?.closeCode;
     final reason = ioChannel?.innerWebSocket?.closeReason;
+    debugPrint('WS Closed. Code: $code, Reason: $reason');
     _errorCtrl.add('WS closed (${code ?? 'no code'}): ${reason ?? 'no reason'}');
     _connectionStateCtrl.add(LiveState.disconnected);
     _channel = null;

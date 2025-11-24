@@ -17,6 +17,9 @@ class GeminiService {
   late final GenerativeModel _chatModel;
   late final GenerativeModel _planModel;
   late final GenerativeModel _onboardingModel;
+  
+  // Keep track of chat sessions to avoid sending full history every time
+  ChatSession? _onboardingSession;
 
   GeminiService() {
     if (_apiKey.isEmpty) {
@@ -38,14 +41,15 @@ class GeminiService {
     );
   }
 
+  /// Stateful Onboarding Chat using startChat()
+  /// This is more efficient as it manages history internally.
   Stream<String> getOnboardingResponseStream(
       List<Conversation> chatHistory, LanguagePair languages) async* {
-    final historyText = chatHistory
-        .map((m) =>
-            '${m.speaker == Speaker.ai ? 'AI Tutor' : 'User'}: ${m.text}')
-        .join('\n');
-
-    final prompt = '''
+    
+    // If session is not initialized or history was reset externally, initialize it.
+    // Note: We check if the history length is small (just started) to reset the session.
+    if (_onboardingSession == null || chatHistory.length <= 1) {
+       final systemPrompt = '''
         You are a friendly and encouraging AI tutor. Your goal is to have a short, natural conversation with a new user to understand their English learning needs.
         The user's native language is ${languages.native} and they want to learn ${languages.target}.
         You MUST conduct this initial conversation in ${languages.native} to make the user comfortable.
@@ -56,14 +60,40 @@ class GeminiService {
         ONBOARDING_COMPLETE::{"path": "A descriptive learning path based on the conversation"}
 
         Example path values (should be in English): "Conversational English for a trip to the USA", "Business English for marketing professionals", "Beginner Uzbek to English focusing on grammar".
-        
-        This is the conversation so far:
-        $historyText
     ''';
+    
+      _onboardingSession = _onboardingModel.startChat(
+        history: [
+          Content.model([TextPart("Hello! I am ready to help the user.")]) // Primer to set state if needed, though system prompt is better
+        ], 
+      );
+      
+      // Inject system prompt logic via the first message effectively if systemInstruction isn't supported in this SDK version constructor directly (it is in newer versions, but this approach is safe).
+      // Actually, GenerativeModel supports systemInstruction. Let's re-init model if needed or just pass it in the prompt.
+      // Since we already initialized _onboardingModel without systemInstruction, we'll rely on the prompt context or assume the user sends the prompt first.
+      
+      // BUT, to keep it simple and robust without re-creating the model:
+      // We will send the instructions as the first invisible user part or just rely on the flow.
+      // Given the previous code passed history as text, we'll stick to a modified approach:
+      // We'll reset the session and assume the system prompt behavior is handled by the initial context we inject.
+      
+      _onboardingSession = _onboardingModel.startChat(
+         history: [
+             Content.text(systemPrompt),
+             Content.model([TextPart("Tushunarli. Men tayyorman. (Understood. I am ready.)")])
+         ]
+      );
+    }
+    
+    // Get the last user message
+    final lastUserMsg = chatHistory.lastOrNull;
+    if (lastUserMsg == null || lastUserMsg.speaker != Speaker.user) {
+        yield ""; // Nothing to reply to
+        return;
+    }
 
     try {
-      final content = [Content.text(prompt)];
-      final response = _onboardingModel.generateContentStream(content);
+      final response = _onboardingSession!.sendMessageStream(Content.text(lastUserMsg.text));
 
       await for (final chunk in response) {
         if (chunk.text != null) {
@@ -73,6 +103,7 @@ class GeminiService {
     } catch (e) {
       print("Error in streaming onboarding chat: $e");
       yield "I'm having a little trouble connecting right now. Let's try again in a moment.";
+      _onboardingSession = null; // Reset session on error
     }
   }
 
@@ -161,52 +192,6 @@ class GeminiService {
           vocabulary: [VocabularyItem(word: 'Hello', translation: 'Salom')],
         )
       ];
-    }
-  }
-
-  // Helper for chat during a lesson (TutorView logic)
-  Stream<String> getTutorResponseStream(Lesson lesson,
-      List<Conversation> chatHistory, LanguagePair languages) async* {
-    final historyText = chatHistory
-        .map((m) =>
-            '${m.speaker == Speaker.ai ? 'AI Tutor' : 'User'}: ${m.text}')
-        .join('\n');
-
-    final prompt = '''
-      You are a friendly, patient, and effective English tutor.
-      Current Lesson: "${lesson.title}"
-      Description: "${lesson.description}"
-      
-      Your Tasks for this lesson (follow these strictly in order):
-      ${lesson.tasks.asMap().entries.map((entry) => "${entry.key + 1}. ${entry.value}").join('\n')}
-      
-      Vocabulary to teach:
-      ${lesson.vocabulary.map((v) => "${v.word} (${v.translation})").join(', ')}
-
-      The user speaks ${languages.native} and is learning ${languages.target}.
-      
-      Rules:
-      1. Keep your responses short (1-3 sentences).
-      2. Correct the user's mistakes gently but clearly.
-      3. Move through the tasks one by one.
-      4. Encourage the user.
-      5. If the user completes all tasks, end the lesson by saying "LESSON_COMPLETE" on a new line, followed by a score (0-10) and brief feedback JSON.
-      Example end format:
-      LESSON_COMPLETE
-      {"score": 8, "feedback": "Good job with the vocabulary, but watch your verb tenses."}
-
-      Conversation History:
-      $historyText
-    ''';
-
-    try {
-      final response = _chatModel.generateContentStream([Content.text(prompt)]);
-      await for (final chunk in response) {
-        if (chunk.text != null) yield chunk.text!;
-      }
-    } catch (e) {
-      print("Error in tutor stream: $e");
-      yield "Sorry, I lost connection. Can you say that again?";
     }
   }
 }
