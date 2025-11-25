@@ -27,7 +27,7 @@ class _TutorScreenState extends State<TutorScreen>
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
 
-  // Audio
+  // Audio components
   final RecorderStream _recorder = RecorderStream();
   final PlayerStream _player = PlayerStream();
   StreamSubscription<List<int>>? _micSub;
@@ -37,7 +37,7 @@ class _TutorScreenState extends State<TutorScreen>
   bool _isConnected = false;
   bool _isConnecting = false;
   bool _isTextMode = false;
-  bool _isAiSpeaking = false;
+  bool _isAiSpeaking = false; // AI gapirayotganda true - mikrofon disabled
   String _streamingText = '';
   XFile? _selectedImage;
 
@@ -67,7 +67,7 @@ class _TutorScreenState extends State<TutorScreen>
         avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
         avAudioSessionCategoryOptions:
             AVAudioSessionCategoryOptions.defaultToSpeaker,
-        avAudioSessionMode: AVAudioSessionMode.videoChat,
+        avAudioSessionMode: AVAudioSessionMode.voiceChat,
         androidAudioAttributes: AndroidAudioAttributes(
           contentType: AndroidAudioContentType.speech,
           usage: AndroidAudioUsage.voiceCommunication,
@@ -100,10 +100,10 @@ class _TutorScreenState extends State<TutorScreen>
 
     final systemPrompt = '''
 You are a strict language tutor teaching a $nativeLang speaker to learn $targetLang.
-Keep responses SHORT. Correct mistakes immediately.
+Keep responses SHORT (1-2 sentences max). Correct mistakes immediately.
 Lesson: ${lesson.title}
 Tasks: ${lesson.tasks.join('; ')}
-When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
+When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
 ''';
 
     try {
@@ -194,18 +194,22 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
       }
     }
 
-    // Handle audio
+    // Handle audio - AI gapirayotganda mikrofon o'chadi
     final parts = message.serverContent?.modelTurn?.parts;
     if (parts != null) {
       for (final part in parts) {
         if (part.inlineData != null) {
           try {
             final pcm = base64Decode(part.inlineData!.data);
-            _player.start();
-            _player.writeChunk(pcm);
+            
+            // AI gapira boshladi - mikrofon o'chirish
             if (!_isAiSpeaking) {
+              _stopMicImmediately(); // Mikrofon darhol o'chadi
               setState(() => _isAiSpeaking = true);
             }
+            
+            _player.start();
+            _player.writeChunk(pcm);
           } catch (e) {
             debugPrint('Audio error: $e');
           }
@@ -213,7 +217,7 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
       }
     }
 
-    // Handle turn complete
+    // Handle turn complete - AI gapirish tugadi
     if (message.serverContent?.turnComplete == true) {
       setState(() => _isAiSpeaking = false);
     }
@@ -264,7 +268,7 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
       completedAt: DateTime.now(),
     );
 
-    await _stopMic();
+    await _stopMicImmediately();
     if (!mounted) return;
 
     showDialog(
@@ -281,8 +285,10 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
   }
 
 
+  // Mikrofon boshlash - faqat AI gapirmayotganda
   Future<void> _startMic() async {
-    if (_session == null || _isMicOn) return;
+    // AI gapirayotgan bo'lsa, mikrofon ishlamaydi
+    if (_session == null || _isMicOn || _isAiSpeaking) return;
 
     HapticFeedback.mediumImpact();
     setState(() {
@@ -291,7 +297,8 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
     });
 
     _micSub = _recorder.audioStream.listen((chunk) {
-      if (_session != null && !_session!.isClosed) {
+      // Faqat AI gapirmayotganda audio yuborish
+      if (_session != null && !_session!.isClosed && !_isAiSpeaking) {
         _session!.sendAudio(chunk, mimeType: 'audio/pcm;rate=16000');
       }
     });
@@ -299,10 +306,20 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
     await _recorder.start();
   }
 
+  // Mikrofon to'xtatish (normal)
   Future<void> _stopMic() async {
+    if (!_isMicOn) return;
     await _micSub?.cancel();
     _micSub = null;
     await _recorder.stop();
+    if (mounted) setState(() => _isMicOn = false);
+  }
+
+  // Mikrofon darhol o'chirish (AI gapira boshlaganda)
+  Future<void> _stopMicImmediately() async {
+    _micSub?.cancel();
+    _micSub = null;
+    _recorder.stop();
     if (mounted) setState(() => _isMicOn = false);
   }
 
@@ -588,32 +605,50 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
   }
 
   Widget _buildMicButton() {
+    // AI gapirayotganda mikrofon disabled
+    final bool isDisabled = _isAiSpeaking || !_isConnected;
+    
     return Listener(
-      onPointerDown: (_) => _startMic(),
-      onPointerUp: (_) => _stopMic(),
-      onPointerCancel: (_) => _stopMic(),
+      onPointerDown: isDisabled ? null : (_) => _startMic(),
+      onPointerUp: isDisabled ? null : (_) => _stopMic(),
+      onPointerCancel: isDisabled ? null : (_) => _stopMic(),
       child: AnimatedBuilder(
         animation: _pulseController,
         builder: (context, child) {
-          return Container(
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
             width: 80,
             height: 80,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _isMicOn ? Colors.blue.shade600 : Colors.white,
+              color: isDisabled
+                  ? Colors.grey.shade300 // Disabled holat
+                  : _isMicOn
+                      ? Colors.blue.shade600
+                      : Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: _isMicOn
-                      ? Colors.blue.withOpacity(0.3)
-                      : Colors.black.withOpacity(0.1),
+                  color: isDisabled
+                      ? Colors.transparent
+                      : _isMicOn
+                          ? Colors.blue.withOpacity(0.3)
+                          : Colors.black.withOpacity(0.1),
                   blurRadius: _isMicOn ? 20 : 15,
                   spreadRadius: _isMicOn ? 2 : 0,
                 ),
               ],
             ),
             child: Icon(
-              _isMicOn ? Icons.graphic_eq : Icons.mic,
-              color: _isMicOn ? Colors.white : Colors.black87,
+              isDisabled
+                  ? Icons.mic_off
+                  : _isMicOn
+                      ? Icons.graphic_eq
+                      : Icons.mic,
+              color: isDisabled
+                  ? Colors.grey.shade500
+                  : _isMicOn
+                      ? Colors.white
+                      : Colors.black87,
               size: 36,
             ),
           );
@@ -725,7 +760,6 @@ When done, say "LESSON_COMPLETE" with score (1-10) and feedback.
       ),
     );
   }
-
 
   Widget _buildChatInput() {
     return Container(
