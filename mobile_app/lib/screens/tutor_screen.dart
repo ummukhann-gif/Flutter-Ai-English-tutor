@@ -98,12 +98,25 @@ class _TutorScreenState extends State<TutorScreen>
     final nativeLang = provider.languages?.native ?? 'Uzbek';
     final targetLang = provider.languages?.target ?? 'English';
 
+    // Eski chat tarixini olish
+    final existingHistory = provider.history.conversations[lesson.id] ?? [];
+    String historyContext = '';
+    if (existingHistory.isNotEmpty) {
+      historyContext = '\n\nPREVIOUS CONVERSATION (continue from here):\n';
+      for (final msg in existingHistory.take(20)) { // Oxirgi 20 ta xabar
+        final role = msg.speaker == Speaker.user ? 'Student' : 'Tutor';
+        historyContext += '$role: ${msg.text}\n';
+      }
+      historyContext += '\nContinue the lesson from where we left off.';
+    }
+
     final systemPrompt = '''
 You are a strict language tutor teaching a $nativeLang speaker to learn $targetLang.
 Keep responses SHORT (1-2 sentences max). Correct mistakes immediately.
 Lesson: ${lesson.title}
 Tasks: ${lesson.tasks.join('; ')}
 When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
+$historyContext
 ''';
 
     try {
@@ -246,18 +259,32 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
 
   Future<void> _handleCompletion(String text, Lesson lesson) async {
     final provider = context.read<AppProvider>();
-    final parts = text.split('LESSON_COMPLETE');
-    final rest = parts.length > 1 ? parts[1].trim() : '';
     int scoreVal = 8;
     String feedback = 'Good job!';
 
-    if (rest.isNotEmpty) {
-      final lines = rest.split('\n').where((e) => e.trim().isNotEmpty).toList();
-      if (lines.isNotEmpty) {
-        scoreVal =
-            int.tryParse(lines[0].replaceAll(RegExp(r'[^0-9]'), '')) ?? 8;
+    // To'liq AI xabarini history'dan olish (chunki text faqat oxirgi chunk)
+    final history = provider.history.conversations[lesson.id] ?? [];
+    String fullAiMessage = text;
+    if (history.isNotEmpty && history.last.speaker == Speaker.ai) {
+      fullAiMessage = history.last.text;
+    }
+
+    // "Score: 7/10" yoki "7/10" formatini qidirish
+    final scoreMatch = RegExp(r'(\d+)\s*/\s*10').firstMatch(fullAiMessage);
+    if (scoreMatch != null) {
+      scoreVal = int.tryParse(scoreMatch.group(1) ?? '8') ?? 8;
+      scoreVal = scoreVal.clamp(1, 10);
+    }
+
+    // Feedback - LESSON_COMPLETE dan keyingi matn
+    if (fullAiMessage.contains('LESSON_COMPLETE')) {
+      final parts = fullAiMessage.split('LESSON_COMPLETE');
+      if (parts.length > 1) {
+        var rest = parts[1].trim();
+        // "Score: 7/10." qismini olib tashlash
+        rest = rest.replaceAll(RegExp(r'^\.?\s*Score:?\s*\d+\s*/\s*10\.?\s*'), '');
+        if (rest.isNotEmpty) feedback = rest.trim();
       }
-      if (lines.length > 1) feedback = lines.sublist(1).join(' ').trim();
     }
 
     final score = Score(

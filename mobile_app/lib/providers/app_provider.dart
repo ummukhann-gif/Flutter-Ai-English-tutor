@@ -143,9 +143,21 @@ class AppProvider with ChangeNotifier {
 
   Future<void> completeLesson(Score score) async {
     final updatedScores = List<Score>.from(_history.scores)..add(score);
-    _history = _history.copyWith(scores: updatedScores);
-    await _saveHistory();
     
+    // Streak uchun bugungi sanani qo'shish
+    final today = DateTime.now();
+    final updatedDates = List<DateTime>.from(_history.studyDates);
+    final todayOnly = DateTime(today.year, today.month, today.day);
+    if (!updatedDates.any((d) => 
+        d.year == todayOnly.year && 
+        d.month == todayOnly.month && 
+        d.day == todayOnly.day)) {
+      updatedDates.add(today);
+    }
+    
+    _history = _history.copyWith(scores: updatedScores, studyDates: updatedDates);
+    await _saveHistory();
+
     _currentLesson = null;
     _status = AppStateStatus.dashboard;
     notifyListeners();
