@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -59,8 +58,6 @@ class AppNavigator extends StatelessWidget {
         return const TutorScreen();
       case AppStateStatus.review:
         return const ReviewScreen();
-      default:
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
   }
 }
