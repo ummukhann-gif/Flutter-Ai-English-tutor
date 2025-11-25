@@ -1,9 +1,9 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:animate_do/animate_do.dart';
 import '../providers/app_provider.dart';
 import '../models/types.dart';
+import '../theme/app_theme.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -53,7 +53,8 @@ class DashboardScreen extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Row(
           children: [
-            const Icon(Icons.local_fire_department_rounded, color: Colors.deepOrange, size: 28),
+            const Icon(Icons.local_fire_department_rounded,
+                color: Colors.deepOrange, size: 28),
             const SizedBox(width: 8),
             const Text('Streak'),
           ],
@@ -123,7 +124,8 @@ class DashboardScreen extends StatelessWidget {
                   context: context,
                   builder: (ctx) => AlertDialog(
                     title: const Text('Qayta boshlash'),
-                    content: const Text('Barcha natijalar o\'chiriladi. Rostdan ham qayta boshlamoqchimisiz?'),
+                    content: const Text(
+                        'Barcha natijalar o\'chiriladi. Rostdan ham qayta boshlamoqchimisiz?'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx),
@@ -134,7 +136,8 @@ class DashboardScreen extends StatelessWidget {
                           Navigator.pop(ctx);
                           context.read<AppProvider>().resetApp();
                         },
-                        child: const Text('Ha', style: TextStyle(color: Colors.red)),
+                        child: const Text('Ha',
+                            style: TextStyle(color: Colors.red)),
                       ),
                     ],
                   ),
@@ -163,7 +166,7 @@ class DashboardScreen extends StatelessWidget {
     final completed = history.scores.length;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      // backgroundColor: theme.colorScheme.surface, // Olib tashlandi, Theme dan oladi (Grey)
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -210,7 +213,8 @@ class DashboardScreen extends StatelessWidget {
                   GestureDetector(
                     onTap: () => _showStreakDialog(context, history),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: history.currentStreak > 0
                             ? Colors.orange.shade50
@@ -251,14 +255,8 @@ class DashboardScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                  borderRadius: BorderRadius.circular(26),
+                  boxShadow: AppTheme.softShadow,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -266,9 +264,12 @@ class DashboardScreen extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Progress', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                        Text('Progress',
+                            style: theme.textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold)),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: theme.colorScheme.primary.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(12),
@@ -290,7 +291,8 @@ class DashboardScreen extends StatelessWidget {
                         value: plan.isEmpty ? 0 : completed / plan.length,
                         minHeight: 8,
                         backgroundColor: Colors.grey.shade100,
-                        valueColor: AlwaysStoppedAnimation(theme.colorScheme.primary),
+                        valueColor:
+                            AlwaysStoppedAnimation(theme.colorScheme.primary),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -306,8 +308,8 @@ class DashboardScreen extends StatelessWidget {
                         _buildStatItem(
                           icon: Icons.star_rounded,
                           label: 'O\'rtacha',
-                          value: history.averageScore > 0 
-                              ? '${history.averageScore.toStringAsFixed(1)}' 
+                          value: history.averageScore > 0
+                              ? '${history.averageScore.toStringAsFixed(1)}'
                               : '-',
                           color: Colors.amber,
                         ),
@@ -333,10 +335,16 @@ class DashboardScreen extends StatelessWidget {
                   final lesson = plan[index];
                   final score = history.scores.firstWhere(
                     (s) => s.lessonId == lesson.id,
-                    orElse: () => Score(lessonId: '', score: -1, feedback: '', completedAt: DateTime(1900)),
+                    orElse: () => Score(
+                        lessonId: '',
+                        score: -1,
+                        feedback: '',
+                        completedAt: DateTime(1900)),
                   );
                   final isCompleted = score.score != -1;
-                  final isLocked = index > 0 && !history.scores.any((s) => s.lessonId == plan[index - 1].id);
+                  final isLocked = index > 0 &&
+                      !history.scores
+                          .any((s) => s.lessonId == plan[index - 1].id);
                   final isCurrent = !isCompleted && !isLocked;
 
                   return FadeInUp(
@@ -388,14 +396,8 @@ class _LessonCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(26),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 8),
-          ),
-        ],
-        border: isCurrent 
+        boxShadow: AppTheme.softShadow,
+        border: isCurrent
             ? Border.all(color: theme.colorScheme.primary, width: 1.5)
             : Border.all(color: Colors.grey.shade200),
       ),
@@ -417,7 +419,10 @@ class _LessonCard extends StatelessWidget {
                     children: [
                       Text(
                         lesson.title,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: isLocked ? Colors.grey : Colors.black87,
                             ),
@@ -436,7 +441,8 @@ class _LessonCard extends StatelessWidget {
                 ),
                 if (isCompleted && score != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.green.shade50,
                       borderRadius: BorderRadius.circular(999),
@@ -499,7 +505,6 @@ class _LessonCard extends StatelessWidget {
   }
 }
 
-
 class _SettingsTile extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -526,7 +531,8 @@ class _SettingsTile extends StatelessWidget {
         child: Icon(icon, color: Colors.grey.shade700),
       ),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(subtitle, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+      subtitle: Text(subtitle,
+          style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
       trailing: const Icon(Icons.chevron_right_rounded),
       onTap: onTap,
     );

@@ -14,6 +14,7 @@ import '../gemini_live/gemini_live.dart';
 import '../models/types.dart';
 import '../providers/app_provider.dart';
 import '../widgets/chat_bubble.dart';
+import '../theme/app_theme.dart';
 
 class TutorScreen extends StatefulWidget {
   const TutorScreen({super.key});
@@ -59,7 +60,6 @@ class _TutorScreenState extends State<TutorScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) => _connect());
   }
 
-
   Future<void> _initAudio() async {
     try {
       final session = await AudioSession.instance;
@@ -90,7 +90,7 @@ class _TutorScreenState extends State<TutorScreen>
 
     setState(() => _isConnecting = true);
 
-    final apiKey = dotenv.env['API_KEY'] ?? 
+    final apiKey = dotenv.env['API_KEY'] ??
         const String.fromEnvironment('API_KEY', defaultValue: '');
 
     _liveService = LiveService(apiKey: apiKey);
@@ -103,7 +103,8 @@ class _TutorScreenState extends State<TutorScreen>
     String historyContext = '';
     if (existingHistory.isNotEmpty) {
       historyContext = '\n\nPREVIOUS CONVERSATION (continue from here):\n';
-      for (final msg in existingHistory.take(20)) { // Oxirgi 20 ta xabar
+      for (final msg in existingHistory.take(20)) {
+        // Oxirgi 20 ta xabar
         final role = msg.speaker == Speaker.user ? 'Student' : 'Tutor';
         historyContext += '$role: ${msg.text}\n';
       }
@@ -175,7 +176,6 @@ $historyContext
     }
   }
 
-
   void _handleMessage(LiveServerMessage message) {
     if (!mounted) return;
 
@@ -209,13 +209,13 @@ $historyContext
         if (part.inlineData != null) {
           try {
             final pcm = base64Decode(part.inlineData!.data);
-            
+
             // AI gapira boshladi - mikrofon o'chirish
             if (!_isAiSpeaking) {
               _stopMicImmediately(); // Mikrofon darhol o'chadi
               setState(() => _isAiSpeaking = true);
             }
-            
+
             _player.start();
             _player.writeChunk(pcm);
           } catch (e) {
@@ -228,7 +228,7 @@ $historyContext
     // Handle turn complete - AI gapirish tugadi
     if (message.serverContent?.turnComplete == true) {
       setState(() => _isAiSpeaking = false);
-      
+
       // Turn tugaganda LESSON_COMPLETE tekshirish (to'liq xabar bilan)
       final history = provider.history.conversations[lesson.id] ?? [];
       if (history.isNotEmpty && history.last.speaker == Speaker.ai) {
@@ -242,8 +242,8 @@ $historyContext
 
   void _appendMessage(Speaker speaker, String text, String lessonId) {
     final provider = context.read<AppProvider>();
-    final history = List<Conversation>.from(
-        provider.history.conversations[lessonId] ?? []);
+    final history =
+        List<Conversation>.from(provider.history.conversations[lessonId] ?? []);
 
     if (history.isNotEmpty && history.last.speaker == speaker) {
       final last = history.last;
@@ -287,7 +287,8 @@ $historyContext
       if (parts.length > 1) {
         var rest = parts[1].trim();
         // "Score: 7/10." qismini olib tashlash
-        rest = rest.replaceAll(RegExp(r'^\.?\s*Score:?\s*\d+\s*/\s*10\.?\s*'), '');
+        rest =
+            rest.replaceAll(RegExp(r'^\.?\s*Score:?\s*\d+\s*/\s*10\.?\s*'), '');
         if (rest.isNotEmpty) feedback = rest.trim();
       }
     }
@@ -314,7 +315,6 @@ $historyContext
       ),
     );
   }
-
 
   // Mikrofon boshlash - faqat AI gapirmayotganda
   Future<void> _startMic() async {
@@ -438,7 +438,6 @@ $historyContext
     super.dispose();
   }
 
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
@@ -447,7 +446,7 @@ $historyContext
     final history = provider.history.conversations[lesson.id] ?? [];
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      // backgroundColor: const Color(0xFFF8F9FA), // Theme dan oladi
       body: SafeArea(
         child: _isTextMode
             ? _buildChatView(lesson, history, provider)
@@ -459,9 +458,10 @@ $historyContext
   Widget _buildLiveView(Lesson lesson, AppProvider provider) {
     final history = provider.history.conversations[lesson.id] ?? [];
     // Oxirgi AI xabarini olish
-    final lastAiMessage = history.isNotEmpty && history.last.speaker == Speaker.ai
-        ? history.last.text
-        : '';
+    final lastAiMessage =
+        history.isNotEmpty && history.last.speaker == Speaker.ai
+            ? history.last.text
+            : '';
 
     return Column(
       children: [
@@ -494,13 +494,8 @@ $historyContext
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 20,
-                          ),
-                        ],
+                        borderRadius: BorderRadius.circular(26),
+                        boxShadow: AppTheme.softShadow,
                       ),
                       child: Text(
                         lastAiMessage,
@@ -565,18 +560,12 @@ $historyContext
     );
   }
 
-
   Widget _buildHeaderButton(IconData icon, VoidCallback onTap) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-          ),
-        ],
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppTheme.softShadow,
       ),
       child: IconButton(
         icon: Icon(icon, color: Colors.black87),
@@ -611,9 +600,8 @@ $historyContext
                     ? 'Live'
                     : 'Offline',
             style: TextStyle(
-              color: _isConnected
-                  ? Colors.green.shade700
-                  : Colors.orange.shade700,
+              color:
+                  _isConnected ? Colors.green.shade700 : Colors.orange.shade700,
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -632,12 +620,7 @@ $historyContext
         decoration: BoxDecoration(
           color: Colors.white,
           shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 15,
-            ),
-          ],
+          boxShadow: AppTheme.softShadow,
         ),
         child: Icon(icon, color: Colors.black87, size: 24),
       ),
@@ -647,7 +630,7 @@ $historyContext
   Widget _buildMicButton() {
     // AI gapirayotganda mikrofon disabled
     final bool isDisabled = _isAiSpeaking || !_isConnected;
-    
+
     return Listener(
       onPointerDown: isDisabled ? null : (_) => _startMic(),
       onPointerUp: isDisabled ? null : (_) => _stopMic(),
@@ -666,17 +649,17 @@ $historyContext
                   : _isMicOn
                       ? Colors.blue.shade600
                       : Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: isDisabled
-                      ? Colors.transparent
-                      : _isMicOn
-                          ? Colors.blue.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.1),
-                  blurRadius: _isMicOn ? 20 : 15,
-                  spreadRadius: _isMicOn ? 2 : 0,
-                ),
-              ],
+              boxShadow: isDisabled
+                  ? []
+                  : _isMicOn
+                      ? [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.4),
+                            blurRadius: 30,
+                            spreadRadius: 5,
+                          )
+                        ]
+                      : AppTheme.softShadow,
             ),
             child: Icon(
               isDisabled
@@ -697,7 +680,6 @@ $historyContext
     );
   }
 
-
   Widget _buildChatView(
       Lesson lesson, List<Conversation> history, AppProvider provider) {
     return Column(
@@ -709,8 +691,9 @@ $historyContext
             color: Colors.white,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: const Color(0xFF94A3B8).withOpacity(0.1),
                 blurRadius: 10,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
@@ -790,9 +773,8 @@ $historyContext
             _isConnected ? 'Online' : 'Offline',
             style: TextStyle(
               fontSize: 11,
-              color: _isConnected
-                  ? Colors.green.shade700
-                  : Colors.orange.shade700,
+              color:
+                  _isConnected ? Colors.green.shade700 : Colors.orange.shade700,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -900,7 +882,6 @@ $historyContext
     );
   }
 }
-
 
 class _CompletionDialog extends StatelessWidget {
   final Score score;
