@@ -310,7 +310,7 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
     if (!_isMicOn) return;
 
     // 1. Pending - mikrofon hali yozadi va yuboradi
-    await Future.delayed(const Duration(seconds: 3));
+    await Future.delayed(const Duration(milliseconds: 1500));
 
     // 2. Pending tugadi - endi to'xtatish
     await _micSub?.cancel();
