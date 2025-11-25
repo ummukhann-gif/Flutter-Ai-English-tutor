@@ -351,17 +351,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
 
   Widget _buildLiveView(ThemeData theme, Lesson lesson, AppProvider provider) {
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF1a1a2e),
-            const Color(0xFF16213e),
-            const Color(0xFF0f3460),
-          ],
-        ),
-      ),
+      color: const Color(0xFFF8F9FA), // Light gray background
       child: SafeArea(
         child: Column(
           children: [
@@ -374,11 +364,18 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                   // Close button
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      icon: const Icon(Icons.close_rounded, color: Colors.black87),
                       onPressed: () => provider.exitLesson(),
                     ),
                   ),
@@ -387,14 +384,10 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
+                      color: _liveState == LiveState.ready || _liveState == LiveState.recording
+                          ? Colors.green.shade50
+                          : Colors.orange.shade50,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: _liveState == LiveState.ready || _liveState == LiveState.recording
-                            ? Colors.greenAccent
-                            : Colors.orangeAccent,
-                        width: 1.5,
-                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -404,18 +397,9 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                           height: 8,
                           decoration: BoxDecoration(
                             color: _liveState == LiveState.ready || _liveState == LiveState.recording
-                                ? Colors.greenAccent
-                                : Colors.orangeAccent,
+                                ? Colors.green
+                                : Colors.orange,
                             shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: (_liveState == LiveState.ready || _liveState == LiveState.recording
-                                    ? Colors.greenAccent
-                                    : Colors.orangeAccent).withValues(alpha: 0.5),
-                                blurRadius: 8,
-                                spreadRadius: 2,
-                              ),
-                            ],
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -425,8 +409,10 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                               : _liveState == LiveState.connecting
                                   ? 'Connecting'
                                   : 'Live',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: _liveState == LiveState.ready || _liveState == LiveState.recording
+                                ? Colors.green.shade700
+                                : Colors.orange.shade700,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 0.5,
@@ -439,11 +425,18 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                   // Chat button
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
+                      icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.black87),
                       onPressed: () => setState(() => _isTextMode = true),
                     ),
                   ),
@@ -479,11 +472,15 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                                 key: const ValueKey('streaming'),
                                 padding: const EdgeInsets.all(24),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.05),
+                                  color: Colors.white,
                                   borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.1),
-                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.05),
+                                      blurRadius: 20,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
                                 ),
                                 child: Text(
                                   _streamingText,
@@ -491,7 +488,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                                   style: const TextStyle(
                                     fontSize: 22,
                                     fontWeight: FontWeight.w500,
-                                    color: Colors.white,
+                                    color: Colors.black87,
                                     height: 1.5,
                                     letterSpacing: 0.3,
                                   ),
@@ -504,7 +501,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                                   Icon(
                                     _isMicOn ? Icons.graphic_eq_rounded : Icons.mic_none_rounded,
                                     size: 64,
-                                    color: Colors.white.withValues(alpha: 0.3),
+                                    color: Colors.grey.shade400,
                                   ),
                                   const SizedBox(height: 24),
                                   Text(
@@ -512,7 +509,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                                     style: TextStyle(
                                       fontSize: 24,
                                       fontWeight: FontWeight.w600,
-                                      color: Colors.white.withValues(alpha: 0.9),
+                                      color: Colors.black87,
                                       letterSpacing: 0.5,
                                     ),
                                   ),
@@ -521,7 +518,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                                     lesson.title,
                                     style: TextStyle(
                                       fontSize: 14,
-                                      color: Colors.white.withValues(alpha: 0.5),
+                                      color: Colors.grey.shade600,
                                       letterSpacing: 1.2,
                                     ),
                                   ),
@@ -580,38 +577,21 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                           height: 80,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: _isMicOn
-                                  ? [
-                                      const Color(0xFF00d4ff),
-                                      const Color(0xFF0099ff),
-                                    ]
-                                  : [
-                                      Colors.white,
-                                      Colors.white.withValues(alpha: 0.9),
-                                    ],
-                            ),
-                            boxShadow: _isMicOn
-                                ? [
-                                    BoxShadow(
-                                      color: const Color(0xFF00d4ff).withValues(alpha: 0.5),
-                                      blurRadius: 20 + (10 * _pulseController.value),
-                                      spreadRadius: 5 + (5 * _pulseController.value),
-                                    ),
-                                  ]
-                                : [
-                                    BoxShadow(
-                                      color: Colors.white.withValues(alpha: 0.3),
-                                      blurRadius: 20,
-                                      spreadRadius: 2,
-                                    ),
-                                  ],
+                            color: _isMicOn ? Colors.blue.shade600 : Colors.white,
+                            boxShadow: [
+                              BoxShadow(
+                                color: _isMicOn 
+                                    ? Colors.blue.withValues(alpha: 0.3)
+                                    : Colors.black.withValues(alpha: 0.1),
+                                blurRadius: _isMicOn ? 20 + (10 * _pulseController.value) : 15,
+                                spreadRadius: _isMicOn ? 2 + (3 * _pulseController.value) : 0,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
                           child: Icon(
                             _isMicOn ? Icons.graphic_eq_rounded : Icons.mic_rounded,
-                            color: _isMicOn ? Colors.white : const Color(0xFF1a1a2e),
+                            color: _isMicOn ? Colors.white : Colors.black87,
                             size: 36,
                           ),
                         );
@@ -645,16 +625,19 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15),
+          color: Colors.white,
           shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.2),
-            width: 1.5,
-          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 15,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Icon(
           icon,
-          color: Colors.white.withValues(alpha: 0.9),
+          color: Colors.black87,
           size: size * 0.45,
         ),
       ),
