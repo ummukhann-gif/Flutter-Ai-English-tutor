@@ -200,10 +200,6 @@ $historyContext
     final outputText = message.serverContent?.outputTranscription?.text;
     if (outputText != null && outputText.isNotEmpty) {
       _appendMessage(Speaker.ai, outputText, lesson.id);
-
-      if (outputText.contains('LESSON_COMPLETE')) {
-        _handleCompletion(outputText, lesson);
-      }
     }
 
     // Handle audio - AI gapirayotganda mikrofon o'chadi
@@ -232,6 +228,15 @@ $historyContext
     // Handle turn complete - AI gapirish tugadi
     if (message.serverContent?.turnComplete == true) {
       setState(() => _isAiSpeaking = false);
+      
+      // Turn tugaganda LESSON_COMPLETE tekshirish (to'liq xabar bilan)
+      final history = provider.history.conversations[lesson.id] ?? [];
+      if (history.isNotEmpty && history.last.speaker == Speaker.ai) {
+        final fullAiMessage = history.last.text;
+        if (fullAiMessage.contains('LESSON_COMPLETE')) {
+          _handleCompletion(fullAiMessage, lesson);
+        }
+      }
     }
   }
 
