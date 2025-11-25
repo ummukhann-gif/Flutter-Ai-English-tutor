@@ -1,11 +1,8 @@
-// lib/models/live_models.dart
+// Gemini Live API Models
+// Based on flutter_gemini_live package
 
 // Enums
-enum Modality {
-  text,
-  image,
-  audio,
-}
+enum Modality { text, image, audio }
 
 // Data Classes
 class Part {
@@ -33,7 +30,7 @@ class Part {
 
 class Blob {
   final String mimeType;
-  final String data; // Base64 encoded string
+  final String data;
 
   Blob({required this.mimeType, required this.data});
 
@@ -90,25 +87,22 @@ class GenerationConfig {
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{};
     if (temperature != null) map['temperature'] = temperature;
-    if (topK != null) map['topK'] = topK;
-    if (topP != null) map['topP'] = topP;
-    if (maxOutputTokens != null) map['maxOutputTokens'] = maxOutputTokens;
+    if (topK != null) map['top_k'] = topK;
+    if (topP != null) map['top_p'] = topP;
+    if (maxOutputTokens != null) map['max_output_tokens'] = maxOutputTokens;
     if (responseModalities != null) {
-      map['responseModalities'] = responseModalities;
+      map['response_modalities'] = responseModalities;
     }
-    if (speechConfig != null) map['speechConfig'] = speechConfig;
+    if (speechConfig != null) map['speech_config'] = speechConfig;
     return map;
   }
 }
 
-// --- Live API Specific Models ---
-
-// Client -> Server
+// Client -> Server Messages
 class LiveClientSetup {
   final String model;
   final GenerationConfig? generationConfig;
-  final Map<String, dynamic>? systemInstruction;
-  final List<dynamic>? tools;
+  final Content? systemInstruction;
   final Map<String, dynamic>? inputAudioTranscription;
   final Map<String, dynamic>? outputAudioTranscription;
 
@@ -116,7 +110,6 @@ class LiveClientSetup {
     required this.model,
     this.generationConfig,
     this.systemInstruction,
-    this.tools,
     this.inputAudioTranscription,
     this.outputAudioTranscription,
   });
@@ -124,15 +117,16 @@ class LiveClientSetup {
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{'model': model};
     if (generationConfig != null) {
-      map['generationConfig'] = generationConfig!.toJson();
+      map['generation_config'] = generationConfig!.toJson();
     }
-    if (systemInstruction != null) map['systemInstruction'] = systemInstruction;
-    if (tools != null) map['tools'] = tools;
+    if (systemInstruction != null) {
+      map['system_instruction'] = systemInstruction!.toJson();
+    }
     if (inputAudioTranscription != null) {
-      map['inputAudioTranscription'] = inputAudioTranscription;
+      map['input_audio_transcription'] = inputAudioTranscription;
     }
     if (outputAudioTranscription != null) {
-      map['outputAudioTranscription'] = outputAudioTranscription;
+      map['output_audio_transcription'] = outputAudioTranscription;
     }
     return map;
   }
@@ -146,8 +140,10 @@ class LiveClientContent {
 
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{};
-    if (turns != null) map['turns'] = turns!.map((e) => e.toJson()).toList();
-    if (turnComplete != null) map['turnComplete'] = turnComplete;
+    if (turns != null) {
+      map['turns'] = turns!.map((e) => e.toJson()).toList();
+    }
+    if (turnComplete != null) map['turn_complete'] = turnComplete;
     return map;
   }
 }
@@ -160,9 +156,9 @@ class LiveClientRealtimeInput {
 
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{};
-    if (audio != null) map['audio'] = audio!.toJson();
+    if (audio != null) map['media_chunks'] = [audio!.toJson()];
     if (mediaChunks != null) {
-      map['mediaChunks'] = mediaChunks!.map((e) => e.toJson()).toList();
+      map['media_chunks'] = mediaChunks!.map((e) => e.toJson()).toList();
     }
     return map;
   }
@@ -178,32 +174,27 @@ class LiveClientMessage {
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{};
     if (setup != null) map['setup'] = setup!.toJson();
-    if (clientContent != null) map['clientContent'] = clientContent!.toJson();
-    if (realtimeInput != null) map['realtimeInput'] = realtimeInput!.toJson();
+    if (clientContent != null) {
+      map['client_content'] = clientContent!.toJson();
+    }
+    if (realtimeInput != null) {
+      map['realtime_input'] = realtimeInput!.toJson();
+    }
     return map;
   }
 }
 
-// Server -> Client
-class LiveServerMessage {
-  final Map<String, dynamic>? setupComplete;
-  final LiveServerContent? serverContent;
-  final Map<String, dynamic>? error;
+// Server -> Client Messages
+class Transcription {
+  final String? text;
+  final bool? finished;
 
-  LiveServerMessage({
-    this.setupComplete,
-    this.serverContent,
-    this.error,
-  });
+  Transcription({this.text, this.finished});
 
-  factory LiveServerMessage.fromJson(Map<String, dynamic> json) {
-    return LiveServerMessage(
-      setupComplete: json['setupComplete'] as Map<String, dynamic>?,
-      serverContent: json['serverContent'] != null
-          ? LiveServerContent.fromJson(
-              json['serverContent'] as Map<String, dynamic>)
-          : null,
-      error: json['error'] as Map<String, dynamic>?,
+  factory Transcription.fromJson(Map<String, dynamic> json) {
+    return Transcription(
+      text: json['text'] as String?,
+      finished: json['finished'] as bool?,
     );
   }
 }
@@ -242,12 +233,28 @@ class LiveServerContent {
   }
 }
 
-class Transcription {
-  final String? text;
+class LiveServerMessage {
+  final Map<String, dynamic>? setupComplete;
+  final LiveServerContent? serverContent;
+  final Map<String, dynamic>? error;
 
-  Transcription({this.text});
+  LiveServerMessage({this.setupComplete, this.serverContent, this.error});
 
-  factory Transcription.fromJson(Map<String, dynamic> json) {
-    return Transcription(text: json['text'] as String?);
+  factory LiveServerMessage.fromJson(Map<String, dynamic> json) {
+    return LiveServerMessage(
+      setupComplete: json['setupComplete'] as Map<String, dynamic>?,
+      serverContent: json['serverContent'] != null
+          ? LiveServerContent.fromJson(
+              json['serverContent'] as Map<String, dynamic>)
+          : null,
+      error: json['error'] as Map<String, dynamic>?,
+    );
+  }
+
+  String? get text {
+    return serverContent?.modelTurn?.parts
+        ?.map((p) => p.text)
+        .where((t) => t != null)
+        .join('');
   }
 }

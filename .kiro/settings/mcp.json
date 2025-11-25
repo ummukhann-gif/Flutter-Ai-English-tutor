@@ -16,7 +16,10 @@
         "hot_reload",
         "connect_dart_tooling_daemon",
         "get_app_logs",
-        "hot_restart"
+        "hot_restart",
+        "list_running_apps",
+        "add_roots",
+        "list_devices"
       ]
     }
   }
