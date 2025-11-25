@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:sound_stream/sound_stream.dart';
@@ -90,8 +91,8 @@ class _TutorScreenState extends State<TutorScreen>
 
     setState(() => _isConnecting = true);
 
-    final apiKey = const String.fromEnvironment('API_KEY',
-        defaultValue: 'AIzaSyCEdijlD0noyMVdOS7_IJuZ1oXkxeseGVw');
+    final apiKey = dotenv.env['API_KEY'] ?? 
+        const String.fromEnvironment('API_KEY', defaultValue: '');
 
     _liveService = LiveService(apiKey: apiKey);
 
@@ -293,7 +294,7 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
     HapticFeedback.mediumImpact();
     setState(() {
       _isMicOn = true;
-      _streamingText = '';
+      // _streamingText tozalanmaydi - faqat AI gapira boshlaganda tozalanadi
     });
 
     _micSub = _recorder.audioStream.listen((chunk) {

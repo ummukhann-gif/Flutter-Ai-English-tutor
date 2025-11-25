@@ -19,7 +19,8 @@
         "hot_restart",
         "list_running_apps",
         "add_roots",
-        "list_devices"
+        "list_devices",
+        "stop_app"
       ]
     }
   }
