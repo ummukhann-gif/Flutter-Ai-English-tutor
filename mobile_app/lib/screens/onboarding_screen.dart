@@ -213,7 +213,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         text: _streamingText.isEmpty ? '...' : _streamingText, 
                         timestamp: DateTime.now(),
                       ),
-                      isTyping: _streamingText.isEmpty,
                     );
                   }
                 },

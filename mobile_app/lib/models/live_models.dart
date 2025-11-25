@@ -2,9 +2,9 @@
 
 // Enums
 enum Modality {
-  TEXT,
-  IMAGE,
-  AUDIO,
+  text,
+  image,
+  audio,
 }
 
 // Data Classes
@@ -93,8 +93,9 @@ class GenerationConfig {
     if (topK != null) map['topK'] = topK;
     if (topP != null) map['topP'] = topP;
     if (maxOutputTokens != null) map['maxOutputTokens'] = maxOutputTokens;
-    if (responseModalities != null)
+    if (responseModalities != null) {
       map['responseModalities'] = responseModalities;
+    }
     if (speechConfig != null) map['speechConfig'] = speechConfig;
     return map;
   }
@@ -108,20 +109,31 @@ class LiveClientSetup {
   final GenerationConfig? generationConfig;
   final Map<String, dynamic>? systemInstruction;
   final List<dynamic>? tools;
+  final Map<String, dynamic>? inputAudioTranscription;
+  final Map<String, dynamic>? outputAudioTranscription;
 
   LiveClientSetup({
     required this.model,
     this.generationConfig,
     this.systemInstruction,
     this.tools,
+    this.inputAudioTranscription,
+    this.outputAudioTranscription,
   });
 
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{'model': model};
-    if (generationConfig != null)
+    if (generationConfig != null) {
       map['generationConfig'] = generationConfig!.toJson();
+    }
     if (systemInstruction != null) map['systemInstruction'] = systemInstruction;
     if (tools != null) map['tools'] = tools;
+    if (inputAudioTranscription != null) {
+      map['inputAudioTranscription'] = inputAudioTranscription;
+    }
+    if (outputAudioTranscription != null) {
+      map['outputAudioTranscription'] = outputAudioTranscription;
+    }
     return map;
   }
 }
@@ -149,8 +161,9 @@ class LiveClientRealtimeInput {
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{};
     if (audio != null) map['audio'] = audio!.toJson();
-    if (mediaChunks != null)
+    if (mediaChunks != null) {
       map['mediaChunks'] = mediaChunks!.map((e) => e.toJson()).toList();
+    }
     return map;
   }
 }

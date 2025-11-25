@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -9,14 +10,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:sound_stream/sound_stream.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'dart:io';
-
-import '../models/live_models.dart';
 import 'package:audio_session/audio_session.dart';
 
-/// Advanced Gemini Live client using raw PCM streams for low-latency audio.
-///
-/// Improved based on flutter_gemini_live package implementation.
+import '../models/live_models.dart';
+
+/// Gemini Live Service using flutter_gemini_live approach
 class LiveGeminiService {
   LiveGeminiService({
     String? apiKey,
@@ -46,14 +44,14 @@ class LiveGeminiService {
   final String _systemInstruction;
 
   WebSocketChannel? _channel;
+  StreamSubscription? _wsSub;
 
-  // SoundStream components (defaults are 16k mono on most devices)
+  // Audio components
   final RecorderStream _recorder = RecorderStream();
   final PlayerStream _player = PlayerStream();
-
   StreamSubscription<List<int>>? _micSub;
-  StreamSubscription<dynamic>? _wsSub;
 
+  // State management
   final _inputTranscriptCtrl = StreamController<String>.broadcast();
   final _outputTranscriptCtrl = StreamController<String>.broadcast();
   final _connectionStateCtrl = StreamController<LiveState>.broadcast();
@@ -61,14 +59,12 @@ class LiveGeminiService {
   final _volumeCtrl = StreamController<double>.broadcast();
 
   static const _silenceThreshold = 500.0;
-  static const _maxReconnectAttempts = 3;
   static const _apiVersion = 'v1beta';
 
-  int _reconnectAttempts = 0;
-  Timer? _reconnectTimer;
   bool _isAiSpeaking = false;
   bool _isManualDisconnect = false;
 
+  // Streams
   Stream<String> get inputTranscriptStream => _inputTranscriptCtrl.stream;
   Stream<String> get outputTranscriptStream => _outputTranscriptCtrl.stream;
   Stream<LiveState> get connectionStateStream => _connectionStateCtrl.stream;
@@ -113,7 +109,7 @@ class LiveGeminiService {
     String? historyContext,
   }) async {
     if (_channel != null) {
-      debugPrint('Already connected, skipping reconnect');
+      debugPrint('Already connected');
       return;
     }
 
@@ -123,7 +119,6 @@ class LiveGeminiService {
       return;
     }
 
-    // Request permissions first
     final status = await Permission.microphone.request();
     if (status != PermissionStatus.granted) {
       _errorCtrl.add('Microphone permission denied');
@@ -134,7 +129,6 @@ class LiveGeminiService {
     _connectionStateCtrl.add(LiveState.connecting);
     _isManualDisconnect = false;
 
-    // Build WebSocket URI
     final uri = Uri.parse(
       'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.$_apiVersion.GenerativeService.BidiGenerateContent?key=$_apiKey',
     );
@@ -142,7 +136,6 @@ class LiveGeminiService {
     debugPrint('🔌 Connecting to WebSocket at $uri');
 
     try {
-      // CRITICAL: Add headers like the working package does
       final headers = {
         'Content-Type': 'application/json',
         'x-goog-api-key': _apiKey,
@@ -150,7 +143,6 @@ class LiveGeminiService {
         'user-agent': 'google-genai-sdk/1.28.0 dart/3.8',
       };
 
-      // Connect with headers
       final webSocket = await WebSocket.connect(
         uri.toString(),
         headers: headers,
@@ -165,7 +157,6 @@ class LiveGeminiService {
 
       final setupCompleter = Completer<void>();
 
-      // Listen to stream
       _wsSub = _channel!.stream.listen(
         (data) {
           _handleMessage(data, setupCompleter);
@@ -178,7 +169,7 @@ class LiveGeminiService {
           _errorCtrl.add('Connection error: $error');
         },
         onDone: _onDone,
-        cancelOnError: true, // IMPORTANT: Like the working package
+        cancelOnError: true,
       );
 
       // Send setup message
@@ -197,6 +188,8 @@ class LiveGeminiService {
               }
             },
           ),
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           systemInstruction: {
             'parts': [
               {
@@ -214,7 +207,6 @@ class LiveGeminiService {
       debugPrint('📤 Sending Setup with model: $modelName');
       _sendMessage(setupMsg);
 
-      // Wait for setup complete with timeout
       await setupCompleter.future.timeout(
         const Duration(seconds: 10),
         onTimeout: () {
@@ -223,17 +215,24 @@ class LiveGeminiService {
       );
 
       _connectionStateCtrl.add(LiveState.ready);
-      _reconnectAttempts = 0; // Reset on successful connection
+
+      try {
+        await _player.start();
+        debugPrint('✓ Audio player started');
+      } catch (e) {
+        debugPrint('Player start skipped: $e');
+      }
+
       debugPrint('✓ Connection established and ready');
     } catch (e, st) {
       debugPrint('❌ Failed to connect: $e\n$st');
       _errorCtrl.add('Connection failed: $e');
       _connectionStateCtrl.add(LiveState.disconnected);
-      _channel = null;
 
-      if (!_isManualDisconnect) {
-        _attemptReconnect();
-      }
+      await _wsSub?.cancel();
+      _wsSub = null;
+      await _channel?.sink.close();
+      _channel = null;
     }
   }
 
@@ -249,10 +248,7 @@ class LiveGeminiService {
 
   void _handleMessage(dynamic data, Completer<void>? setupCompleter) {
     try {
-      // Handle both String and List<int> (Uint8List)
       final jsonData = data is String ? data : utf8.decode(data as List<int>);
-
-      // debugPrint('📥 Received: ${jsonData.substring(0, math.min(200, jsonData.length))}...');
 
       final jsonMap = jsonDecode(jsonData) as Map<String, dynamic>;
       final msg = LiveServerMessage.fromJson(jsonMap);
@@ -306,6 +302,10 @@ class LiveGeminiService {
             try {
               final pcm = base64Decode(inline.data);
 
+              try {
+                _player.start();
+              } catch (_) {}
+
               if (!_isAiSpeaking) {
                 _isAiSpeaking = true;
                 debugPrint('🔊 AI started speaking');
@@ -317,14 +317,11 @@ class LiveGeminiService {
             }
           }
 
-          // Text fallback - REMOVED to prevent showing internal thoughts/reasoning
-          // The outputTranscription field should be sufficient for spoken text.
-          /*
           final textPart = part.text;
           if (textPart != null && textPart.isNotEmpty) {
             _outputTranscriptCtrl.add(textPart);
+            debugPrint('🤖 AI (text part): $textPart');
           }
-          */
         }
       }
 
@@ -346,17 +343,8 @@ class LiveGeminiService {
     }
   }
 
-  bool _isMicMuted = false;
-
-  /// Start microphone stream (or unmute if already running)
   Future<void> startMicStream() async {
-    // If already recording (subscription exists), just unmute
-    if (_micSub != null) {
-      _isMicMuted = false;
-      _connectionStateCtrl.add(LiveState.recording);
-      debugPrint('🎤 Microphone unmuted');
-      return;
-    }
+    if (_micSub != null) return;
 
     if (_channel == null) {
       debugPrint('⚠ No connection, attempting to connect...');
@@ -370,7 +358,6 @@ class LiveGeminiService {
     }
 
     try {
-      // Start player
       try {
         await _player.start();
         debugPrint('✓ Audio player started');
@@ -378,30 +365,15 @@ class LiveGeminiService {
         debugPrint('Player already running: $e');
       }
 
-      _isMicMuted = false; // Ensure unmuted initially
-
       _micSub = _recorder.audioStream.listen(
         (chunk) {
-          // SOFTWARE MUTE LOGIC
-          // We must ALWAYS process the chunk to drain the buffer,
-          // but only send it if not muted.
-
-          if (_isMicMuted) {
-            // Just drain, do nothing.
-            // Optionally we could still calculate volume for "ambient" visuals,
-            // but for now let's just drop it to be safe.
-            return;
-          }
-
           try {
             final bytes = Uint8List.fromList(chunk);
             final samples = Int16List.view(bytes.buffer);
 
-            // Volume for visualizer
             final rms = _calculateRms(samples);
             _volumeCtrl.add(_normalizeVolume(rms));
 
-            // Active noise injection during silence
             if (rms < _silenceThreshold) {
               final rnd = math.Random();
               for (int i = 0; i < samples.length; i++) {
@@ -432,17 +404,13 @@ class LiveGeminiService {
   }
 
   Future<void> stopMicStream() async {
-    // SOFTWARE MUTE: Just stop sending data, but keep recorder running
-    // This ensures we don't cut off audio, and more importantly,
-    // we keep draining the buffer so old audio doesn't pile up.
-    _isMicMuted = true;
-
-    // Send a burst of silence to help VAD detect end of speech
-    _sendSilenceKick();
-
-    // Update state to Ready so UI knows we are "done" listening
+    await _micSub?.cancel();
+    _micSub = null;
+    try {
+      await _recorder.stop();
+    } catch (_) {}
     _connectionStateCtrl.add(LiveState.ready);
-    debugPrint('🎤 Microphone muted (software) + Silence Kick');
+    debugPrint('🎤 Recording stopped');
   }
 
   Future<void> interrupt() async {
@@ -479,13 +447,16 @@ class LiveGeminiService {
   }
 
   Future<void> sendText(String text) async {
+    if (text.trim().isEmpty) return;
+
     if (_channel == null) {
-      debugPrint('⚠ Cannot send text: not connected');
+      debugPrint('⚠ Not connected, attempting to connect for text send...');
+      await connect();
+    }
+    if (_channel == null) {
       _errorCtrl.add('Not connected');
       return;
     }
-
-    if (text.trim().isEmpty) return;
 
     await interrupt();
 
@@ -533,7 +504,7 @@ class LiveGeminiService {
 
   void _sendSilenceKick() {
     try {
-      final samples = Int16List(8000); // 0.5s at 16kHz
+      final samples = Int16List(8000);
       _sendPcmChunk(Uint8List.view(samples.buffer));
     } catch (e) {
       debugPrint('Error sending silence kick: $e');
@@ -555,36 +526,10 @@ class LiveGeminiService {
     return (rms / 32768.0).clamp(0.0, 1.0);
   }
 
-  void _attemptReconnect() {
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      debugPrint('❌ Max reconnect attempts reached');
-      _errorCtrl.add('Connection lost. Please try again.');
-      _reconnectAttempts = 0;
-      return;
-    }
-
-    _reconnectAttempts++;
-    final delay = Duration(seconds: math.min(_reconnectAttempts * 2, 10));
-
-    debugPrint(
-        '🔄 Attempting reconnect $_reconnectAttempts/$_maxReconnectAttempts in ${delay.inSeconds}s...');
-
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(delay, () async {
-      if (_channel == null && !_isManualDisconnect) {
-        debugPrint('🔄 Reconnecting...');
-        await connect();
-      }
-    });
-  }
-
   Future<void> disconnect() async {
     debugPrint('🔌 Disconnecting...');
 
     _isManualDisconnect = true;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    _reconnectAttempts = 0;
 
     try {
       await _micSub?.cancel();
@@ -620,9 +565,6 @@ class LiveGeminiService {
   Future<void> dispose() async {
     debugPrint('🗑️ Disposing LiveGeminiService...');
 
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-
     await disconnect();
 
     try {
@@ -650,13 +592,9 @@ class LiveGeminiService {
     _isAiSpeaking = false;
     _connectionStateCtrl.add(LiveState.disconnected);
 
-    // Only reconnect if not manually disconnected and not normal closure
-    if (!_isManualDisconnect && code != null && code != 1000 && code != 1001) {
+    if (!_isManualDisconnect) {
       _errorCtrl.add(
           'Connection closed: ${reason ?? "Unknown reason"} (code: $code)');
-      _attemptReconnect();
-    } else {
-      _reconnectAttempts = 0;
     }
   }
 }

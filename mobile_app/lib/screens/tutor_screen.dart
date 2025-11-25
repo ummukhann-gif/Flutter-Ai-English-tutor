@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,7 @@ class _TutorScreenState extends State<TutorScreen>
   bool _isTextMode = false;
   LiveState _liveState = LiveState.disconnected;
   String _streamingText = '';
+  XFile? _selectedImage;
 
   late final LiveGeminiService _live;
   late AnimationController _pulseController;
@@ -95,15 +97,17 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
       // When receiving transcript from voice, we might want to merge if it's a continuous flow,
       // but usually, a new transcript packet implies a new phrase.
       // However, for stability, let's keep merging for voice transcripts unless silence broke it.
+      if (!mounted) return;
       if (current != null) _appendMessage(Speaker.user, text, current.id);
 
       if (_streamingText.isNotEmpty) {
-        setState(() => _streamingText = '');
+        if (mounted) setState(() => _streamingText = '');
       }
     });
 
     _outputSub = _live.outputTranscriptStream.listen((text) {
       final current = context.read<AppProvider>().currentLesson;
+      if (!mounted) return;
       if (current != null) {
         _appendMessage(Speaker.ai, text, current.id);
 
@@ -118,6 +122,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
     });
 
     _stateSub = _live.connectionStateStream.listen((state) {
+      if (!mounted) return;
       setState(() {
         _isReady = state == LiveState.ready || state == LiveState.recording;
         _isMicOn = state == LiveState.recording;
@@ -131,6 +136,7 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
 
     _errorSub = _live.errorStream.listen((err) {
       debugPrint('Live error: $err');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $err'), backgroundColor: Colors.red),
       );
@@ -212,12 +218,20 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
   }
 
   Future<void> _handleSendText() async {
+    // If image is selected, send with image
+    if (_selectedImage != null) {
+      await _sendImageWithText();
+      return;
+    }
+
     final text = _textController.text.trim();
     if (text.isEmpty) return;
+    
     _textController.clear();
     final provider = context.read<AppProvider>();
     final lesson = provider.currentLesson;
     if (lesson == null) return;
+    
     await _ensureConnected();
     _appendMessage(Speaker.user, text, lesson.id, forceNewBubble: true);
     _live.sendText(text);
@@ -233,29 +247,64 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
         imageQuality: 80,
       );
 
-      if (image != null) {
-        final bytes = await image.readAsBytes();
-        await _ensureConnected();
-
-        await _live.sendImage(bytes, mimeType: 'image/jpeg');
-
-        final provider = context.read<AppProvider>();
-        final lesson = provider.currentLesson;
-        if (lesson != null) {
-          _appendMessage(Speaker.user, '[Sent an image]', lesson.id,
-              forceNewBubble: true);
+      if (image != null && mounted) {
+        setState(() => _selectedImage = image);
+        
+        // Switch to text mode to show preview
+        if (!_isTextMode) {
+          setState(() => _isTextMode = true);
         }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Image sent to AI Tutor')),
-        );
-        setState(() => _streamingText = '');
       }
     } catch (e) {
       debugPrint('Error picking image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendImageWithText() async {
+    if (_selectedImage == null) return;
+    
+    final text = _textController.text.trim();
+    if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to pick image: $e')),
+        const SnackBar(content: Text('Please add a description for the image')),
       );
+      return;
+    }
+
+    try {
+      await _ensureConnected();
+      
+      final bytes = await _selectedImage!.readAsBytes();
+      
+      // Send image first
+      await _live.sendImage(bytes, mimeType: 'image/jpeg');
+      
+      // Then send text
+      await _live.sendText(text);
+
+      final provider = context.read<AppProvider>();
+      final lesson = provider.currentLesson;
+      if (lesson != null && mounted) {
+        _appendMessage(Speaker.user, text, lesson.id, forceNewBubble: true);
+      }
+
+      _textController.clear();
+      setState(() {
+        _selectedImage = null;
+        _streamingText = '';
+      });
+    } catch (e) {
+      debugPrint('Error sending image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send: $e')),
+        );
+      }
     }
   }
 
@@ -301,197 +350,268 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
   }
 
   Widget _buildLiveView(ThemeData theme, Lesson lesson, AppProvider provider) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.blue.shade50.withOpacity(0.3),
-                  Colors.white,
-                ],
-              ),
-            ),
-          ),
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF1a1a2e),
+            const Color(0xFF16213e),
+            const Color(0xFF0f3460),
+          ],
         ),
-        Column(
+      ),
+      child: SafeArea(
+        child: Column(
           children: [
+            // Header
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded,
-                        size: 28, color: Colors.black87),
-                    onPressed: () => provider.exitLesson(),
-                  ),
+                  // Close button
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      onPressed: () => provider.exitLesson(),
+                    ),
+                  ),
+                  
+                  // Status indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _liveState == LiveState.ready || _liveState == LiveState.recording
+                            ? Colors.greenAccent
+                            : Colors.orangeAccent,
+                        width: 1.5,
+                      ),
                     ),
                     child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(
                           width: 8,
                           height: 8,
                           decoration: BoxDecoration(
-                            color: _liveState == LiveState.ready ||
-                                    _liveState == LiveState.recording
-                                ? Colors.green
-                                : Colors.orange,
+                            color: _liveState == LiveState.ready || _liveState == LiveState.recording
+                                ? Colors.greenAccent
+                                : Colors.orangeAccent,
                             shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: (_liveState == LiveState.ready || _liveState == LiveState.recording
+                                    ? Colors.greenAccent
+                                    : Colors.orangeAccent).withValues(alpha: 0.5),
+                                blurRadius: 8,
+                                spreadRadius: 2,
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
                           _liveState == LiveState.recording
                               ? 'Listening'
-                              : 'Live',
+                              : _liveState == LiveState.connecting
+                                  ? 'Connecting'
+                                  : 'Live',
                           style: const TextStyle(
-                            fontSize: 14,
+                            color: Colors.white,
+                            fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: Colors.black87,
+                            letterSpacing: 0.5,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.chat_bubble_outline_rounded,
-                        size: 26, color: Colors.black87),
-                    onPressed: () => setState(() => _isTextMode = true),
+                  
+                  // Chat button
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
+                      onPressed: () => setState(() => _isTextMode = true),
+                    ),
                   ),
                 ],
               ),
             ),
+
+            // Main content area
             Expanded(
               child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: SingleChildScrollView(
-                    reverse: true,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: _streamingText.isNotEmpty
-                          ? Text(
-                              _streamingText,
-                              key: const ValueKey('streaming'),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                                height: 1.4,
-                              ),
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'AI Tutor',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                    color: Colors.grey.shade500,
-                                    letterSpacing: 1.2,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  _isMicOn ? 'Listening...' : 'Tap to speak',
-                                  style: TextStyle(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ],
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Animated streaming text or placeholder
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 400),
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.1),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
                             ),
-                    ),
+                          );
+                        },
+                        child: _streamingText.isNotEmpty
+                            ? Container(
+                                key: const ValueKey('streaming'),
+                                padding: const EdgeInsets.all(24),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(24),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.1),
+                                  ),
+                                ),
+                                child: Text(
+                                  _streamingText,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.white,
+                                    height: 1.5,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              )
+                            : Column(
+                                key: const ValueKey('placeholder'),
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _isMicOn ? Icons.graphic_eq_rounded : Icons.mic_none_rounded,
+                                    size: 64,
+                                    color: Colors.white.withValues(alpha: 0.3),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  Text(
+                                    _isMicOn ? 'Listening...' : 'Hold to speak',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white.withValues(alpha: 0.9),
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    lesson.title,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.white.withValues(alpha: 0.5),
+                                      letterSpacing: 1.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
+
+            // Bottom controls
             Padding(
-              padding: const EdgeInsets.only(bottom: 64, top: 24),
+              padding: const EdgeInsets.only(bottom: 48, top: 24),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _buildCircleButton(
-                    icon: Icons.camera_alt_outlined,
+                  // Camera button
+                  _buildModernButton(
+                    icon: Icons.camera_alt_rounded,
                     onTap: _handleImageSelection,
-                    color: Colors.grey.shade100,
-                    iconColor: Colors.black87,
+                    size: 56,
                   ),
 
-                  const SizedBox(width: 40),
-
+                  // Main mic button
                   Listener(
                     onPointerDown: (_) async {
                       if (_liveState == LiveState.connecting) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Connecting... please wait')),
-                        );
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Connecting... please wait')),
+                          );
+                        }
                         return;
                       }
 
-                      if (!_isReady) {
-                        HapticFeedback.lightImpact();
-                        await _ensureConnected();
-                        return;
-                      }
-
-                      HapticFeedback.lightImpact();
+                      HapticFeedback.mediumImpact();
                       await _ensureConnected();
                       await _live.startMicStream();
-                      setState(() => _isMicOn = true);
+                      if (mounted) setState(() => _isMicOn = true);
                     },
                     onPointerUp: (_) async {
                       await _live.stopMicStream();
-                      setState(() => _isMicOn = false);
+                      if (mounted) setState(() => _isMicOn = false);
                     },
                     onPointerCancel: (_) async {
                       await _live.stopMicStream();
-                      setState(() => _isMicOn = false);
+                      if (mounted) setState(() => _isMicOn = false);
                     },
                     child: AnimatedBuilder(
                       animation: _pulseController,
                       builder: (context, child) {
                         return Container(
-                          width: 90,
-                          height: 90,
+                          width: 80,
+                          height: 80,
                           decoration: BoxDecoration(
-                            color: Colors.black,
                             shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: _isMicOn
+                                  ? [
+                                      const Color(0xFF00d4ff),
+                                      const Color(0xFF0099ff),
+                                    ]
+                                  : [
+                                      Colors.white,
+                                      Colors.white.withValues(alpha: 0.9),
+                                    ],
+                            ),
                             boxShadow: _isMicOn
                                 ? [
                                     BoxShadow(
-                                      color: Colors.blue.withOpacity(0.3),
-                                      blurRadius:
-                                          20 + (10 * _pulseController.value),
-                                      spreadRadius:
-                                          5 + (5 * _pulseController.value),
-                                    )
+                                      color: const Color(0xFF00d4ff).withValues(alpha: 0.5),
+                                      blurRadius: 20 + (10 * _pulseController.value),
+                                      spreadRadius: 5 + (5 * _pulseController.value),
+                                    ),
                                   ]
                                 : [
                                     BoxShadow(
-                                      color: Colors.black.withOpacity(0.1),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 4),
-                                    )
+                                      color: Colors.white.withValues(alpha: 0.3),
+                                      blurRadius: 20,
+                                      spreadRadius: 2,
+                                    ),
                                   ],
                           ),
                           child: Icon(
-                            _isMicOn ? Icons.graphic_eq : Icons.mic_rounded,
-                            color: Colors.white,
+                            _isMicOn ? Icons.graphic_eq_rounded : Icons.mic_rounded,
+                            color: _isMicOn ? Colors.white : const Color(0xFF1a1a2e),
                             size: 36,
                           ),
                         );
@@ -499,117 +619,278 @@ When completed, end your response (in $nativeLang) with "LESSON_COMPLETE" on a n
                     ),
                   ),
 
-                  const SizedBox(width: 40),
-
-                  // Placeholder for symmetry, or we can remove it.
-                  // User asked to remove the "three dots".
-                  const SizedBox(width: 56),
+                  // Keyboard button
+                  _buildModernButton(
+                    icon: Icons.keyboard_rounded,
+                    onTap: () => setState(() => _isTextMode = true),
+                    size: 56,
+                  ),
                 ],
               ),
             ),
           ],
         ),
-      ],
+      ),
     );
   }
 
-  Widget _buildCircleButton({
+  Widget _buildModernButton({
     required IconData icon,
     required VoidCallback onTap,
-    required Color color,
-    required Color iconColor,
+    required double size,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 56,
-        height: 56,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
-          color: color,
+          color: Colors.white.withValues(alpha: 0.15),
           shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.2),
+            width: 1.5,
+          ),
         ),
-        child: Icon(icon, color: iconColor, size: 24),
+        child: Icon(
+          icon,
+          color: Colors.white.withValues(alpha: 0.9),
+          size: size * 0.45,
+        ),
       ),
     );
   }
 
   Widget _buildChatView(
       ThemeData theme, Lesson lesson, List<Conversation> history) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new, size: 22),
-                onPressed: () => setState(() => _isTextMode = false),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Chat',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
+    return Container(
+      color: Colors.grey.shade50,
+      child: Column(
+        children: [
+          // Header
+          Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            itemCount: history.length,
-            itemBuilder: (context, index) {
-              return ChatBubble(message: history[index]);
-            },
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(top: BorderSide(color: Colors.grey.shade100)),
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.add_photo_alternate_outlined,
-                    color: Colors.grey),
-                onPressed: _handleImageSelection,
-              ),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+                  onPressed: () => setState(() {
+                    _isTextMode = false;
+                    _selectedImage = null;
+                  }),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Chat Mode',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        lesson.title,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Connection status
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(24),
+                    color: _liveState == LiveState.ready || _liveState == LiveState.recording
+                        ? Colors.green.shade50
+                        : Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: TextField(
-                    controller: _textController,
-                    decoration: const InputDecoration(
-                      hintText: 'Type a message...',
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    onSubmitted: (_) => _handleSendText(),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: _liveState == LiveState.ready || _liveState == LiveState.recording
+                              ? Colors.green
+                              : Colors.orange,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _liveState == LiveState.ready || _liveState == LiveState.recording
+                            ? 'Online'
+                            : 'Connecting',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _liveState == LiveState.ready || _liveState == LiveState.recording
+                              ? Colors.green.shade700
+                              : Colors.orange.shade700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              CircleAvatar(
-                backgroundColor: Colors.blueAccent,
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_upward_rounded,
-                      color: Colors.white, size: 20),
-                  onPressed: _handleSendText,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+
+          // Messages
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              itemCount: history.length,
+              itemBuilder: (context, index) {
+                return ChatBubble(message: history[index]);
+              },
+            ),
+          ),
+
+          // Input area
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Image preview
+                if (_selectedImage != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.file(
+                            File(_selectedImage!.path),
+                            height: 120,
+                            width: 120,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _selectedImage = null),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.6),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Input row
+                Row(
+                  children: [
+                    // Image button
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.add_photo_alternate_rounded,
+                          color: Colors.grey.shade700,
+                        ),
+                        onPressed: _handleImageSelection,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+
+                    // Text input
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: TextField(
+                          controller: _textController,
+                          maxLines: null,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: InputDecoration(
+                            hintText: _selectedImage != null
+                                ? 'Describe the image...'
+                                : 'Type a message...',
+                            hintStyle: TextStyle(color: Colors.grey.shade500),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onSubmitted: (_) => _handleSendText(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+
+                    // Send button
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF00d4ff), Color(0xFF0099ff)],
+                        ),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF00d4ff).withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.arrow_upward_rounded, color: Colors.white),
+                        onPressed: _handleSendText,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
