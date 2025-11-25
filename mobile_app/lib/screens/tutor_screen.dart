@@ -39,7 +39,6 @@ class _TutorScreenState extends State<TutorScreen>
   bool _isConnecting = false;
   bool _isTextMode = false;
   bool _isAiSpeaking = false; // AI gapirayotganda true - mikrofon disabled
-  String _streamingText = '';
   XFile? _selectedImage;
 
   // Gemini Live
@@ -188,7 +187,6 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
     final outputText = message.serverContent?.outputTranscription?.text;
     if (outputText != null && outputText.isNotEmpty) {
       _appendMessage(Speaker.ai, outputText, lesson.id);
-      setState(() => _streamingText += outputText);
 
       if (outputText.contains('LESSON_COMPLETE')) {
         _handleCompletion(outputText, lesson);
@@ -345,7 +343,6 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
     if (lesson != null) {
       _appendMessage(Speaker.user, text, lesson.id);
     }
-    setState(() => _streamingText = '');
   }
 
   Future<void> _pickImage() async {
@@ -384,10 +381,7 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
     }
 
     _textController.clear();
-    setState(() {
-      _selectedImage = null;
-      _streamingText = '';
-    });
+    setState(() => _selectedImage = null);
   }
 
   void _scrollToBottom() {
@@ -433,6 +427,12 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
   }
 
   Widget _buildLiveView(Lesson lesson, AppProvider provider) {
+    final history = provider.history.conversations[lesson.id] ?? [];
+    // Oxirgi AI xabarini olish
+    final lastAiMessage = history.isNotEmpty && history.last.speaker == Speaker.ai
+        ? history.last.text
+        : '';
+
     return Column(
       children: [
         // Header
@@ -459,7 +459,7 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (_streamingText.isNotEmpty)
+                  if (lastAiMessage.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
@@ -473,7 +473,7 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
                         ],
                       ),
                       child: Text(
-                        _streamingText,
+                        lastAiMessage,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 20,
