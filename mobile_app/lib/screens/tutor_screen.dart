@@ -305,21 +305,19 @@ When all tasks done, say "LESSON_COMPLETE" with score (1-10) and brief feedback.
     await _recorder.start();
   }
 
-  // Mikrofon to'xtatish (normal) - buffer flush kutish bilan
+  // Mikrofon to'xtatish (normal) - pending bilan
   Future<void> _stopMic() async {
     if (!_isMicOn) return;
-    
-    // 1. Recorder to'xtatish (yangi audio yozilmaydi)
-    await _recorder.stop();
-    
-    // 2. Bufferdagi audio network orqali ketishini kutish
-    await Future.delayed(const Duration(milliseconds: 1500));
-    
-    // 3. Stream subscription to'xtatish
+
+    // 1. Pending - mikrofon hali yozadi va yuboradi
+    await Future.delayed(const Duration(seconds: 3));
+
+    // 2. Pending tugadi - endi to'xtatish
     await _micSub?.cancel();
     _micSub = null;
-    
-    // 4. UI yangilash
+    await _recorder.stop();
+
+    // 3. UI yangilash
     if (mounted) setState(() => _isMicOn = false);
   }
 
