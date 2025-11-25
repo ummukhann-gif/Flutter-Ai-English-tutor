@@ -21,6 +21,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // Temporary storage for streaming response
   String _streamingText = '';
 
+  // Keep service instance to maintain chat session state
+  final GeminiService _geminiService = GeminiService();
+
   @override
   void initState() {
     super.initState();
@@ -75,10 +78,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     });
     _scrollToBottom();
 
-    final gemini = GeminiService(); 
-    
     try {
-      final stream = gemini.getOnboardingResponseStream(
+      final stream = _geminiService.getOnboardingResponseStream(
         currentHistory,
         provider.languages!,
       );
@@ -116,7 +117,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
              }
            }
         } catch (e) {
-          print("JSON Parse error: $e");
+          debugPrint("JSON Parse error: $e");
+          ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text('Reja tuzishda xatolik bo\'ldi, qaytadan urining.')),
+          );
         }
       } else {
         // Normal response
@@ -129,7 +133,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
 
     } catch (e) {
-      print("Error: $e");
+      debugPrint("Error: $e");
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text('Aloqa xatosi: $e')),
+       );
     } finally {
       if (mounted) {
         setState(() {
@@ -142,7 +149,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
   
   Map<String, dynamic> _parseJson(String text) {
-    text = text.replaceAll('```json', '').replaceAll('```', '').trim();
+    // Robust parsing: remove markdown blocks if any
+    text = text.replaceAll(RegExp(r'^```json\s*', multiLine: true), '');
+    text = text.replaceAll(RegExp(r'^```\s*', multiLine: true), '');
+    text = text.trim();
     return jsonDecode(text);
   }
 

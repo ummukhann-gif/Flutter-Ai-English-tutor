@@ -55,7 +55,7 @@ class GeminiService {
         You MUST conduct this initial conversation in ${languages.native} to make the user comfortable.
         Start by introducing yourself in ${languages.native} and asking what they want to achieve. Ask about their current level, interests, and goals (e.g., travel, business, exams).
         Keep your messages short and engaging, writing in a simple, friendly tone in ${languages.native}.
-        
+
         When you feel you have enough information to create a personalized learning plan, end your final message with a special token on a new line. The token MUST be in the format:
         ONBOARDING_COMPLETE::{"path": "A descriptive learning path based on the conversation"}
 
@@ -117,7 +117,7 @@ class GeminiService {
       You are an expert language curriculum planner, a master strategist creating detailed lesson plans for an AI tutor.
       The user is a ${languages.native} speaker who wants to learn ${languages.target}.
       Their learning goal is: "$learningPath".
-      Their learning history is: Previous Scores: $historySummary. 
+      Their learning history is: Previous Scores: $historySummary.
       Use this history to create a new, adaptive lesson plan. If a topic has a low score, re-introduce it or a similar topic. Avoid repeating mastered topics.
 
       Generate a personalized lesson plan with 5-7 progressive lessons.
