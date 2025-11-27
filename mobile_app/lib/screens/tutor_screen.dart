@@ -14,6 +14,7 @@ import '../gemini_live/gemini_live.dart';
 import '../models/types.dart';
 import '../providers/app_provider.dart';
 import '../widgets/chat_bubble.dart';
+import '../widgets/live_caption_widget.dart';
 import '../theme/app_theme.dart';
 
 class TutorScreen extends StatefulWidget {
@@ -41,6 +42,10 @@ class _TutorScreenState extends State<TutorScreen>
   bool _isTextMode = false;
   bool _isAiSpeaking = false; // AI gapirayotganda true - mikrofon disabled
   XFile? _selectedImage;
+  
+  String _currentTurnText = ''; // Hozirgi turn uchun yig'ilgan matn
+
+  final StreamController<String> _captionStream = StreamController<String>.broadcast();
 
   // Gemini Live
   LiveService? _liveService;
@@ -199,6 +204,10 @@ $historyContext
     // Handle AI transcription
     final outputText = message.serverContent?.outputTranscription?.text;
     if (outputText != null && outputText.isNotEmpty) {
+      // Hozirgi turn matnini yig'ish
+      _currentTurnText += outputText;
+      _captionStream.add(outputText);
+      
       _appendMessage(Speaker.ai, outputText, lesson.id);
     }
 
@@ -213,6 +222,7 @@ $historyContext
             // AI gapira boshladi - mikrofon o'chirish
             if (!_isAiSpeaking) {
               _stopMicImmediately(); // Mikrofon darhol o'chadi
+              _currentTurnText = ''; // Yangi turn - matnni tozalash
               setState(() => _isAiSpeaking = true);
             }
 
@@ -228,6 +238,7 @@ $historyContext
     // Handle turn complete - AI gapirish tugadi
     if (message.serverContent?.turnComplete == true) {
       setState(() => _isAiSpeaking = false);
+      _currentTurnText = ''; // Turn tugadi - tozalash
 
       // Turn tugaganda LESSON_COMPLETE tekshirish (to'liq xabar bilan)
       final history = provider.history.conversations[lesson.id] ?? [];
@@ -435,6 +446,7 @@ $historyContext
     _scrollController.dispose();
     _textController.dispose();
     _pulseController.dispose();
+    _captionStream.close();
     super.dispose();
   }
 
@@ -489,23 +501,13 @@ $historyContext
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (lastAiMessage.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(26),
-                        boxShadow: AppTheme.softShadow,
-                      ),
-                      child: Text(
-                        lastAiMessage,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black87,
-                          height: 1.5,
-                        ),
+                  if (lastAiMessage.isNotEmpty || _isAiSpeaking)
+                    Expanded(
+                      child: LiveCaptionWidget(
+                        key: const ValueKey('live_caption'),
+                        textStream: _captionStream.stream,
+                        initialText: lastAiMessage,
+                        currentTurnText: _currentTurnText,
                       ),
                     )
                   else
