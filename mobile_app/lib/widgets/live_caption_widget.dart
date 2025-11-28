@@ -31,14 +31,16 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
   late Animation<double> _scaleAnimation;
   late Animation<double> _opacityAnimation;
 
+  final ScrollController _scrollController = ScrollController();
+  bool _showTopShadow = false;
+  bool _showBottomShadow = false;
+
   @override
   void initState() {
     super.initState();
 
-    // 1. Tarixni yuklaymiz (initialText allaqachon currentTurnText ni o'z ichiga oladi)
     _fullText = widget.initialText;
 
-    // 2. MUHIM FIX: Faqat animatsiya uchun navbatga qo'shamiz (matn emas!)
     if (widget.currentTurnText.isNotEmpty) {
       final existingWords = widget.currentTurnText
           .trim()
@@ -64,12 +66,39 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
       ),
     );
 
-    // 3. Streamni tinglashni boshlaymiz
+    _scrollController.addListener(_onScroll);
+
     _subscribe();
 
-    // 4. Agar boshlang'ich so'zlar bo'lsa, darhol animatsiyani boshlaymiz
     if (_wordQueue.isNotEmpty) {
       _processQueue();
+    }
+
+    // Check initial scroll state
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+
+    // reverse: true logic
+    // offset 0 is visually at the bottom (end of text)
+    // offset maxScroll is visually at the top (start of text)
+
+    // Show top shadow if we are NOT at the top (start of text) -> offset < maxScroll
+    final showTop = offset < maxScroll - 5;
+
+    // Show bottom shadow if we are NOT at the bottom (end of text) -> offset > 0
+    final showBottom = offset > 5;
+
+    if (showTop != _showTopShadow || showBottom != _showBottomShadow) {
+      setState(() {
+        _showTopShadow = showTop;
+        _showBottomShadow = showBottom;
+      });
     }
   }
 
@@ -80,6 +109,9 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
       setState(() {
         _fullText += newChunk;
       });
+
+      // Check scroll again after text update
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
 
       final newWords = newChunk
           .trim()
@@ -130,38 +162,110 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
   void dispose() {
     _subscription?.cancel();
     _popController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Playful, larger font
     final mainTextStyle = GoogleFonts.nunito(
-      fontSize: 22,
+      fontSize: 24,
       fontWeight: FontWeight.w700,
-      color: Colors.black87,
-      height: 1.5,
+      color: const Color(0xFF2D3748), // Dark grey/blue
+      height: 1.4,
     );
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min, // Shrink vertically
       children: [
-        Expanded(
+        Flexible(
           child: Container(
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: SingleChildScrollView(
-              reverse: true,
-              physics: const BouncingScrollPhysics(),
-              child: Text(
-                _fullText,
-                textAlign: TextAlign.center,
-                style: mainTextStyle,
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.45,
+            ),
+            margin: const EdgeInsets.symmetric(horizontal: 24.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Stack(
+                children: [
+                  SingleChildScrollView(
+                    controller: _scrollController,
+                    reverse: true,
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      _fullText,
+                      textAlign: TextAlign.center,
+                      style: mainTextStyle,
+                    ),
+                  ),
+
+                  // Top Shadow (Visual Top) - corresponds to maxScrollExtent in reverse list?
+                  // Wait, Stack positions are visual. Top: 0 is visual top.
+                  if (_showTopShadow)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 40,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.white,
+                              Colors.white.withOpacity(0),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // Bottom Shadow (Visual Bottom)
+                  if (_showBottomShadow)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: 40,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              Colors.white,
+                              Colors.white.withOpacity(0),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
         ),
+
+        const SizedBox(height: 24),
+
+        // Popping word animation
         SizedBox(
-          height: 100,
+          height: 80,
           child: Center(
             child: AnimatedBuilder(
               animation: _popController,
@@ -172,12 +276,26 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
                   opacity: _opacityAnimation.value,
                   child: Transform.scale(
                     scale: _scaleAnimation.value,
-                    child: Text(
-                      _currentWord,
-                      style: GoogleFonts.nunito(
-                        fontSize: 36,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.blueAccent,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.2),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          )
+                        ]
+                      ),
+                      child: Text(
+                        _currentWord,
+                        style: GoogleFonts.nunito(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.blueAccent,
+                        ),
                       ),
                     ),
                   ),
@@ -186,7 +304,7 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
             ),
           ),
         ),
-        const SizedBox(height: 30),
+        const SizedBox(height: 10),
       ],
     );
   }
