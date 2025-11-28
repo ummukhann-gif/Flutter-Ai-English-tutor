@@ -5,7 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 class LiveCaptionWidget extends StatefulWidget {
   final Stream<String> textStream;
   final String initialText;
-  final String currentTurnText; // Hozirgi turn uchun matn (TutorScreen dan)
+  final String currentTurnText;
 
   const LiveCaptionWidget({
     super.key,
@@ -24,6 +24,9 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
   String _currentWord = '';
   StreamSubscription<String>? _subscription;
 
+  final List<String> _wordQueue = [];
+  bool _isAnimating = false;
+
   late AnimationController _popController;
   late Animation<double> _scaleAnimation;
   late Animation<double> _opacityAnimation;
@@ -31,38 +34,44 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
   @override
   void initState() {
     super.initState();
-    
-    // Boshlang'ich matnni o'rnatish
+
+    // 1. Tarixni yuklaymiz
     _fullText = widget.initialText;
-    
-    // Agar currentTurnText bor bo'lsa, oxirgi so'zni olish
+
+    // 2. MUHIM FIX: Widget ochilguncha kelib bo'lgan matnni ham qo'shamiz
     if (widget.currentTurnText.isNotEmpty) {
-      final words = widget.currentTurnText.trim().split(RegExp(r'\s+'));
-      if (words.isNotEmpty) {
-        _currentWord = words.last;
-      }
+      _fullText += widget.currentTurnText;
+      final existingWords = widget.currentTurnText
+          .trim()
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+      _wordQueue.addAll(existingWords);
     }
 
     _popController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 200),
     );
 
-    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _popController,
-        curve: Curves.elasticOut,
-      ),
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _popController, curve: Curves.elasticOut),
     );
 
     _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _popController,
-        curve: const Interval(0.0, 0.3, curve: Curves.easeOut),
+        curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
       ),
     );
 
+    // 3. Streamni tinglashni boshlaymiz
     _subscribe();
+
+    // 4. Agar boshlang'ich so'zlar bo'lsa, darhol animatsiyani boshlaymiz
+    if (_wordQueue.isNotEmpty) {
+      _processQueue();
+    }
   }
 
   void _subscribe() {
@@ -70,20 +79,52 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
       if (newChunk.isEmpty || !mounted) return;
 
       setState(() {
-        // Yuqoridagi matn uchun
         _fullText += newChunk;
-
-        // Hozirgi so'zni yangi chunk dan olish
-        final words = newChunk.trim().split(RegExp(r'\s+'));
-        if (words.isNotEmpty && words.last.isNotEmpty) {
-          _currentWord = words.last;
-        }
       });
 
-      // Animatsiyani ishga tushirish
-      _popController.reset();
-      _popController.forward();
+      final newWords = newChunk
+          .trim()
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+      _wordQueue.addAll(newWords);
+
+      if (!_isAnimating) {
+        _processQueue();
+      }
     });
+  }
+
+  void _processQueue() async {
+    if (_wordQueue.isEmpty || !mounted) {
+      _isAnimating = false;
+      return;
+    }
+    _isAnimating = true;
+
+    final nextWord = _wordQueue.removeAt(0);
+
+    setState(() {
+      _currentWord = nextWord;
+    });
+
+    _popController.reset();
+    _popController.forward();
+
+    int delay = 300;
+    if (_wordQueue.length > 10) {
+      delay = 50;
+    } else if (_wordQueue.length > 5) {
+      delay = 150;
+    } else if (_wordQueue.length > 2) {
+      delay = 200;
+    }
+
+    await Future.delayed(Duration(milliseconds: delay));
+
+    if (mounted) {
+      _processQueue();
+    }
   }
 
   @override
@@ -102,23 +143,9 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
       height: 1.5,
     );
 
-    final highlightTextStyle = GoogleFonts.nunito(
-      fontSize: 36,
-      fontWeight: FontWeight.w900,
-      color: Colors.blueAccent,
-      shadows: [
-        Shadow(
-          color: Colors.blue.withValues(alpha: 0.3),
-          offset: const Offset(2, 2),
-          blurRadius: 4,
-        ),
-      ],
-    );
-
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // 1. To'liq matn (tepada)
         Expanded(
           child: Container(
             alignment: Alignment.center,
@@ -134,8 +161,6 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
             ),
           ),
         ),
-
-        // 2. Hozirgi so'z (pastda, animatsiya bilan)
         SizedBox(
           height: 100,
           child: Center(
@@ -150,7 +175,11 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
                     scale: _scaleAnimation.value,
                     child: Text(
                       _currentWord,
-                      style: highlightTextStyle,
+                      style: GoogleFonts.nunito(
+                        fontSize: 36,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.blueAccent,
+                      ),
                     ),
                   ),
                 );
