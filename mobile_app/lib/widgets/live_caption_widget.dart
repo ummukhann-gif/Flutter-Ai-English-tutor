@@ -35,12 +35,11 @@ class _LiveCaptionWidgetState extends State<LiveCaptionWidget>
   void initState() {
     super.initState();
 
-    // 1. Tarixni yuklaymiz
+    // 1. Tarixni yuklaymiz (initialText allaqachon currentTurnText ni o'z ichiga oladi)
     _fullText = widget.initialText;
 
-    // 2. MUHIM FIX: Widget ochilguncha kelib bo'lgan matnni ham qo'shamiz
+    // 2. MUHIM FIX: Faqat animatsiya uchun navbatga qo'shamiz (matn emas!)
     if (widget.currentTurnText.isNotEmpty) {
-      _fullText += widget.currentTurnText;
       final existingWords = widget.currentTurnText
           .trim()
           .split(RegExp(r'\s+'))
