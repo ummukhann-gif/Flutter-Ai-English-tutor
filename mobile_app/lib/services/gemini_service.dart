@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:firebase_ai/firebase_ai.dart';
 import '../models/types.dart';
 
 class GeminiService {
-  // Prefer .env, fallback to dart-define
   static final String _apiKey =
       dotenv.env['API_KEY'] ?? const String.fromEnvironment('API_KEY', defaultValue: '');
   static final String _chatModelName = dotenv.env['GEMINI_CHAT_MODEL'] ??
@@ -18,36 +17,27 @@ class GeminiService {
   late final GenerativeModel _planModel;
   late final GenerativeModel _onboardingModel;
   
-  // Keep track of chat sessions to avoid sending full history every time
   ChatSession? _onboardingSession;
 
   GeminiService() {
-    if (_apiKey.isEmpty) {
-      print('Warning: API_KEY is not set. AI features will not work.');
-    }
-    _chatModel = GenerativeModel(
+    final firebaseAI = FirebaseAI.googleAI();
+
+    _chatModel = firebaseAI.generativeModel(
       model: _chatModelName,
-      apiKey: _apiKey,
     );
 
-    _planModel = GenerativeModel(
+    _planModel = firebaseAI.generativeModel(
       model: _planModelName,
-      apiKey: _apiKey,
     );
 
-    _onboardingModel = GenerativeModel(
+    _onboardingModel = firebaseAI.generativeModel(
       model: _onboardingModelName,
-      apiKey: _apiKey,
     );
   }
 
-  /// Stateful Onboarding Chat using startChat()
-  /// This is more efficient as it manages history internally.
   Stream<String> getOnboardingResponseStream(
       List<Conversation> chatHistory, LanguagePair languages) async* {
     
-    // If session is not initialized or history was reset externally, initialize it.
-    // Note: We check if the history length is small (just started) to reset the session.
     if (_onboardingSession == null || chatHistory.length <= 1) {
        final systemPrompt = '''
         You are a friendly and encouraging AI tutor. Your goal is to have a short, natural conversation with a new user to understand their English learning needs.
@@ -63,21 +53,6 @@ class GeminiService {
     ''';
     
       _onboardingSession = _onboardingModel.startChat(
-        history: [
-          Content.model([TextPart("Hello! I am ready to help the user.")]) // Primer to set state if needed, though system prompt is better
-        ], 
-      );
-      
-      // Inject system prompt logic via the first message effectively if systemInstruction isn't supported in this SDK version constructor directly (it is in newer versions, but this approach is safe).
-      // Actually, GenerativeModel supports systemInstruction. Let's re-init model if needed or just pass it in the prompt.
-      // Since we already initialized _onboardingModel without systemInstruction, we'll rely on the prompt context or assume the user sends the prompt first.
-      
-      // BUT, to keep it simple and robust without re-creating the model:
-      // We will send the instructions as the first invisible user part or just rely on the flow.
-      // Given the previous code passed history as text, we'll stick to a modified approach:
-      // We'll reset the session and assume the system prompt behavior is handled by the initial context we inject.
-      
-      _onboardingSession = _onboardingModel.startChat(
          history: [
              Content.text(systemPrompt),
              Content.model([TextPart("Tushunarli. Men tayyorman. (Understood. I am ready.)")])
@@ -85,10 +60,9 @@ class GeminiService {
       );
     }
     
-    // Get the last user message
     final lastUserMsg = chatHistory.lastOrNull;
     if (lastUserMsg == null || lastUserMsg.speaker != Speaker.user) {
-        yield ""; // Nothing to reply to
+        yield "";
         return;
     }
 
@@ -103,7 +77,7 @@ class GeminiService {
     } catch (e) {
       print("Error in streaming onboarding chat: $e");
       yield "I'm having a little trouble connecting right now. Let's try again in a moment.";
-      _onboardingSession = null; // Reset session on error
+      _onboardingSession = null;
     }
   }
 
@@ -133,7 +107,6 @@ class GeminiService {
     ''';
 
     try {
-      // Use a JSON-capable model for plan generation
       final response = await _planModel.generateContent(
         [Content.text(prompt)],
         generationConfig: GenerationConfig(
@@ -152,18 +125,11 @@ class GeminiService {
                       'word': Schema.string(),
                       'translation': Schema.string(),
                     },
-                    requiredProperties: ['word', 'translation'],
+                    // requiredProperties removed as optionalProperties defaults to none meaning all are required
                   ),
                 ),
               },
-              requiredProperties: [
-                'id',
-                'title',
-                'description',
-                'startingPrompt',
-                'tasks',
-                'vocabulary'
-              ],
+              // requiredProperties removed as optionalProperties defaults to none meaning all are required
             ),
           ),
         ),
@@ -177,7 +143,6 @@ class GeminiService {
       return jsonList.map((json) => Lesson.fromJson(json)).toList();
     } catch (e) {
       print("Error generating lesson plan: $e");
-      // Fallback plan
       return [
         Lesson(
           id: 'fallback-1',
